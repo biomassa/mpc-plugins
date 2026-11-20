@@ -1,0 +1,17 @@
+{
+  "name": "scalaSeq",
+  "manufacturer": "blackdingus",
+  "version": "1.3.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "ByZq",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/scalaseq-arm32.so",
+  "file64": "VST/scalaseq-arm64.so",
+  "description": "Monophonic pitch and gate sequencer for Scala tunings (port of dingus pitchGateSeq): 32 sequences, lanes, chance ops; plays MIDI note + bend through its own ALSA port.",
+  "author": "blackdingus",
+  "url": "",
+  "license": "MIT"
+}

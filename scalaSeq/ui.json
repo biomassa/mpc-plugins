@@ -1,0 +1,382 @@
+{
+  "kit": "mono",
+  "qlinkGroups": "columns",
+  "pages": [
+    {
+      "name": "NOTE",
+      "controls": [
+        {
+          "param": "Note",
+          "widget": "knob"
+        },
+        {
+          "param": "VEL",
+          "widget": "knob"
+        },
+        {
+          "param": "DUTY",
+          "widget": "knob"
+        },
+        {
+          "param": "Step Entry",
+          "widget": "switch"
+        },
+        {
+          "param": "Start",
+          "widget": "knob"
+        },
+        {
+          "param": "GLIDE",
+          "widget": "knob"
+        },
+        {
+          "param": "Cursor",
+          "widget": "knob"
+        },
+        {
+          "param": "Delete",
+          "widget": "switch"
+        },
+        {
+          "param": "Length",
+          "widget": "knob"
+        },
+        {
+          "param": "RATCH",
+          "widget": "knob"
+        },
+        {
+          "param": "Entry Len",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        "empty",
+        {
+          "param": "Degree",
+          "widget": "knob",
+          "polarity": "bipolar"
+        },
+        {
+          "param": "FADE",
+          "widget": "knob",
+          "polarity": "bipolar"
+        },
+        {
+          "param": "Snap",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        "empty"
+      ]
+    },
+    {
+      "name": "CHANCE",
+      "controls": [
+        {
+          "param": "Op 1",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Op 2",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Op 3",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Op 4",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Prob 1",
+          "widget": "knob"
+        },
+        {
+          "param": "Prob 2",
+          "widget": "knob"
+        },
+        {
+          "param": "Prob 3",
+          "widget": "knob"
+        },
+        {
+          "param": "Prob 4",
+          "widget": "knob"
+        },
+        {
+          "param": "PTN 1",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "PTN 2",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "PTN 3",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "PTN 4",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Amount 1",
+          "widget": "knob"
+        },
+        {
+          "param": "Amount 2",
+          "widget": "knob"
+        },
+        {
+          "param": "Amount 3",
+          "widget": "knob"
+        },
+        {
+          "param": "Amount 4",
+          "widget": "knob"
+        }
+      ]
+    },
+    {
+      "name": "SETUP",
+      "controls": [
+        {
+          "param": "Sequence",
+          "widget": "knob"
+        },
+        {
+          "param": "Rate",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Direction",
+          "widget": "switch"
+        },
+        {
+          "param": "Velocity",
+          "widget": "fader"
+        },
+        {
+          "param": "Steps",
+          "widget": "knob"
+        },
+        {
+          "param": "Swing",
+          "widget": "knob"
+        },
+        {
+          "param": "PTN Count",
+          "widget": "switch"
+        },
+        "empty",
+        {
+          "param": "Range Start",
+          "widget": "knob"
+        },
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Range End",
+          "widget": "knob"
+        },
+        "empty",
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "OUTPUT",
+      "controls": [
+        {
+          "param": "Scale",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Out Ch",
+          "widget": "knob"
+        },
+        {
+          "param": "Bend Up",
+          "widget": "knob"
+        },
+        {
+          "param": "Curve",
+          "widget": "switch"
+        },
+        {
+          "param": "Root",
+          "widget": "knob",
+          "overlay": "menu"
+        },
+        {
+          "param": "Voices",
+          "widget": "knob"
+        },
+        {
+          "param": "Bend Down",
+          "widget": "knob"
+        },
+        "empty",
+        {
+          "param": "Root Tune",
+          "widget": "knob",
+          "polarity": "bipolar"
+        },
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "MASK",
+      "controls": [
+        {
+          "param": "Deg 0",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 1",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 2",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 3",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 4",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 5",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 6",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 7",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 8",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 9",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 10",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 11",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 12",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 13",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 14",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 15",
+          "widget": "switch"
+        }
+      ]
+    },
+    {
+      "name": "MASK 2",
+      "controls": [
+        {
+          "param": "Deg 16",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 17",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 18",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 19",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 20",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 21",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 22",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 23",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 24",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 25",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 26",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 27",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 28",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 29",
+          "widget": "switch"
+        },
+        {
+          "param": "Deg 30",
+          "widget": "switch"
+        },
+        "empty"
+      ]
+    }
+  ]
+}
