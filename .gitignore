@@ -1,0 +1,17 @@
+# Build output (tools/build.py, tools/package.py)
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# AI assistant files
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.claude-work/
+.mcp.json
+AGENTS.md
+
+# Belongs to the SDK clone
+.gitkeep

@@ -1,0 +1,30 @@
+{
+  "kit": "mono",
+  "qlinkGroups": "columns",
+  "pages": [
+    {
+      "name": "RETUNE",
+      "controls": [
+        { "param": "Scale",     "widget": "knob", "overlay": "menu" },
+        { "param": "Bend Up",   "widget": "knob" },
+        { "param": "First Ch",  "widget": "knob" },
+        { "widget": "text", "text": "Scala Retuner" },
+
+        { "param": "Mapping",   "widget": "knob", "overlay": "menu" },
+        { "param": "Bend Down", "widget": "knob" },
+        { "param": "Voices",    "widget": "knob" },
+        "empty",
+
+        { "param": "Root",      "widget": "knob", "overlay": "menu" },
+        { "param": "Curve",     "widget": "switch" },
+        { "param": "Velocity",  "widget": "fader" },
+        "empty",
+
+        { "param": "Root Tune", "widget": "knob", "polarity": "bipolar" },
+        { "param": "In Bend",   "widget": "knob" },
+        "empty",
+        "empty"
+      ]
+    }
+  ]
+}

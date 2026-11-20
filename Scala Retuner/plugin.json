@@ -1,0 +1,17 @@
+{
+  "name": "Scala Retuner",
+  "manufacturer": "blackdingus",
+  "version": "1.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "Bi2r",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/scala-retuner-arm32.so",
+  "file64": "VST/scala-retuner-arm64.so",
+  "description": "Silent MIDI retuner: plays notes in a Scala (.scl/.kbm) tuning on other tracks (keygroups, OPx-4) as 12-TET note + pitch bend, one note per channel, via its own ALSA MIDI port.",
+  "author": "blackdingus",
+  "url": "",
+  "license": "MIT"
+}
