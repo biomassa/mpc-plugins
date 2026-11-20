@@ -33,14 +33,20 @@
 //   9 Voices    number of output channels used in rotation (= polyphony)
 //  10 In Bend   your bend wheel's range in scale steps: fully up = the pitch of the key that many
 //               steps above; 0 = ignore the wheel
+//  11..         display parameters for the ROLL page (1.2), written by the worker thread:
+//               Grid X, Grid 1..31 (scale degree lines), Trace 1..8 (pitch class of the note on
+//               output channel First Ch + n, 0 = silent), Last Deg, Last Oct, Last Cents.
+//               The plugin overwrites them; setting them by hand has no effect.
+//  54..69       Col X 1..16: x position of each roll column (constant)
+//  70..197      roll cells, column c (1 = oldest) x voice v: y position of the marker
 //
 // Forwarded to the output channels: pitch bend (added to each note's retuning bend), every CC
 // (mod wheel, sustain, expression ...), channel aftertouch; polyphonic aftertouch goes to the
 // channel of its note. Sustain keeps a pedal-held note's channel busy until the pedal is up.
 
 #include "mpc_plugin.h"
-#include "scala.h"
-#include "alsa_out.h"
+#include "../../common/scala.h"
+#include "../../common/alsa_out.h"
 
 #include <algorithm>
 #include <cctype>
@@ -49,7 +55,9 @@
 #include <cmath>
 #include <condition_variable>
 #include <mutex>
+#include <chrono>
 #include <thread>
+#include <time.h>
 
 #include <dirent.h>
 #if defined(__linux__)
@@ -71,8 +79,25 @@ enum ParamIndex
     kFirstCh,
     kVoices,
     kInBend,      // appended in 1.1: incoming pitch-bend range in scale steps
-    kNumParams
+    // appended in 1.2: display parameters for the ROLL page
+    kGridX,
+    kGrid0,
+    kTrace0 = kGrid0 + scala::RetuneTable::kMaxGrid,
+    kLastDeg = kTrace0 + 8,
+    kLastOct,
+    kLastCents,
+    // appended in 1.2: scrolling roll (16 columns x 8 voices of XYPad markers)
+    kColX0,
+    kCell0 = kColX0 + 16,
+    kNumParams = kCell0 + 16 * 8
 };
+
+constexpr int kNumTraces = 8;
+constexpr int kRollCols = 16;
+// Roll cells: XYPad y position. The pad is taller than the visible roll by a masked strip at the
+// bottom: y = kRollPark + pc * (1 - kRollPark). A silent cell is parked at y = 0, under the mask.
+constexpr float kRollPark = 24.0f / (480.0f + 24.0f);
+constexpr float kTraceFloor = 0.05f;   // trace value = floor + (1 - floor) * pitch class; 0 = silent
 
 const char* kBuiltin12 = "! built-in\n12-EDO\n12\n100.\n200.\n300.\n400.\n500.\n600.\n700.\n800.\n900.\n1000.\n1100.\n2/1\n";
 
@@ -115,6 +140,14 @@ public:
     ~Wakeup() { sem_destroy(&sem_); }
     void post() { sem_post(&sem_); }
     void wait() { while (sem_wait(&sem_) != 0) {} }
+    void waitMs(int ms)
+    {
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += (long)ms * 1000000L;
+        if (ts.tv_nsec >= 1000000000L) { ts.tv_sec += 1; ts.tv_nsec -= 1000000000L; }
+        sem_timedwait(&sem_, &ts);
+    }
 private:
     sem_t sem_;
 #else
@@ -125,6 +158,7 @@ private:
         cv_.wait_for(l, std::chrono::milliseconds(2), [this] { return flag_.load(); });
         flag_.store(false);
     }
+    void waitMs(int) { wait(); }
 private:
     std::mutex m_;
     std::condition_variable cv_;
@@ -193,6 +227,31 @@ public:
         addParam(mpc::intParam   ("firstch",  "First Ch",  1, 16, 1));
         addParam(mpc::intParam   ("voices",   "Voices",    1, 16, 4));
         addParam(mpc::intParam   ("inbend",   "In Bend",   0, 24, 2, "steps"));
+        // 1.2: display parameters (ROLL page)
+        addParam(mpc::floatParam ("gridx",    "Grid X",    0.0f, 1.0f, 0.5f, "", 2));
+        for (int g = 0; g < scala::RetuneTable::kMaxGrid; ++g)
+        {
+            gridIds_[g] = "grid" + std::to_string(g + 1);
+            gridNames_[g] = "Grid " + std::to_string(g + 1);
+            addParam(mpc::floatParam(gridIds_[g].c_str(), gridNames_[g].c_str(), 0.0f, 1.0f, 0.0f, "", 3));
+        }
+        for (int i = 0; i < kNumTraces; ++i)
+        {
+            traceIds_[i] = "trace" + std::to_string(i + 1);
+            traceNames_[i] = "Trace " + std::to_string(i + 1);
+            addParam(mpc::floatParam(traceIds_[i].c_str(), traceNames_[i].c_str(), 0.0f, 1.0f, 0.0f, "", 3));
+        }
+        addParam(mpc::floatParam ("lastdeg",   "Last Deg",   0.0f, 1023.0f, 0.0f, "", 0));
+        addParam(mpc::intParam   ("lastoct",   "Last Oct",   -16, 16, 0));
+        addParam(mpc::floatParam ("lastcents", "Last Cents", 0.0f, 12000.0f, 0.0f, "c", 1));
+        for (int c = 0; c < kRollCols; ++c)
+            addParam(mpc::floatParam(("colx" + std::to_string(c + 1)).c_str(), ("Col X " + std::to_string(c + 1)).c_str(),
+                                     0.0f, 1.0f, (c + 0.5f) / kRollCols, "", 3));
+        for (int c = 0; c < kRollCols; ++c)
+            for (int v = 0; v < kNumTraces; ++v)
+                addParam(mpc::floatParam(("cell" + std::to_string(c + 1) + "_" + std::to_string(v + 1)).c_str(),
+                                         ("C" + std::to_string(c + 1) + " V" + std::to_string(v + 1)).c_str(),
+                                         0.0f, 1.0f, 0.0f, "", 3));
 
         addProgram("Keygroups ch1-4",  {100, (float)defScale, 0, 60, 0, 24, 24, 0, 1, 4, 2});
         addProgram("OPx-4 ch1-4",      {100, (float)defScale, 0, 60, 0, 24, 24, 1, 1, 4, 2});
@@ -200,6 +259,7 @@ public:
         addProgram("Mono ch1",         {100, (float)defScale, 0, 60, 0, 24, 24, 0, 1, 1, 2});
 
         for (int& k : keyChan_) k = -1;
+        for (auto& h : hitKey_) h.store(-1);
         rebuild();   // table ready before the first block
         const int n = g_instances.fetch_add(1);
         if (n == 0) std::snprintf(clientName_, sizeof clientName_, "Scala Retuner");
@@ -227,12 +287,16 @@ public:
         for (int& k : keyChan_) k = -1;
         wheel_ = 0.0f;
         sustain_ = false;
+        for (auto& d : dispOn_) d.store(false, std::memory_order_relaxed);
+        dispWheel_.store(0.0f);
+        displayDirty_.store(true);
         wake_.post();
     }
 
     void process(mpc::ProcessContext& ctx) override
     {
         // Outputs are already zeroed: this plugin makes no sound.
+        if (ctx.transport.tempoValid && ctx.transport.bpm > 1.0) bpm_.store((float)ctx.transport.bpm, std::memory_order_relaxed);
         if (ctx.numMidiEvents == 0) return;
 
         const scala::RetuneTable& t = acquireTable();
@@ -263,6 +327,11 @@ public:
                 chans_[c].note = out;
                 chans_[c].started = ++clock_;
                 keyChan_[key] = c;
+                dispKey_[c].store(key, std::memory_order_relaxed);
+                dispOn_[c].store(true, std::memory_order_relaxed);
+                hitKey_[c].store(key, std::memory_order_relaxed);   // shown in the roll even if released before the next step
+                lastKey_.store(key, std::memory_order_relaxed);
+                displayDirty_.store(true);
                 sent = true;
             }
             else if (e.isNoteOff())
@@ -275,6 +344,8 @@ public:
                 if (i + 1 < ctx.numMidiEvents && (ctx.midi[i + 1].data[0] & 0xF0) == 0xE0) continue;
                 const int pb = e.pitchBend();
                 wheel_ = pb >= 0 ? pb / 8191.0f : pb / 8192.0f;
+                dispWheel_.store(wheel_, std::memory_order_relaxed);
+                displayDirty_.store(true);
                 // every channel that has sounded, including release tails
                 for (int c = 0; c < 16; ++c)
                     if (chans_[c].lastKey >= 0) sendBend(c, scala::bendFor(t, chans_[c].lastKey, wheel_));
@@ -326,6 +397,22 @@ public:
 
     bool formatValue(int index, float plain, std::string& out) override
     {
+        char tb[24];
+        if (index == kLastDeg)
+        {
+            std::snprintf(tb, sizeof tb, "%d\\%d", (int)std::lround(plain), dispSize_.load());
+            out = tb; return true;
+        }
+        if (index == kLastOct)
+        {
+            std::snprintf(tb, sizeof tb, "Oct %+d", (int)std::lround(plain));
+            out = tb; return true;
+        }
+        if (index == kLastCents)
+        {
+            std::snprintf(tb, sizeof tb, "%.1fc", plain);
+            out = tb; return true;
+        }
         if (index != kRoot) return false;
         static const char* names[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
         const int n = (int)std::lround(plain);
@@ -392,7 +479,7 @@ private:
         info.name         = "Scala Retuner";
         info.vendor       = "blackdingus";   // must match plugin.json "manufacturer"
         info.uniqueId     = MPC_FOURCC(kUid[0], kUid[1], kUid[2], kUid[3]);
-        info.version      = 1100;
+        info.version      = 1200;
         info.isInstrument = true;
         info.numInputs    = 0;
         info.numOutputs   = 2;
@@ -436,6 +523,8 @@ private:
         if (c < 0 || chans_[c].key != key) return;
         ring_.push((uint8_t)(0x80 | c), (uint8_t)chans_[c].note, 0);
         chans_[c].key = -1;
+        dispOn_[c].store(false, std::memory_order_relaxed);
+        displayDirty_.store(true);
         if (sustain_) chans_[c].sustained = true;
         else chans_[c].released = ++clock_;
     }
@@ -444,14 +533,46 @@ private:
     void workerLoop()
     {
         alsa_.open(clientName_, "MIDI Out");
+        displayDirty_.store(true);
+        bool pending = true;
+        auto lastPush = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        auto nextStep = std::chrono::steady_clock::now();
         while (!quit_.load())
         {
-            wake_.wait();
+            {
+                // sleep until the next roll step, or less if a display update is pending
+                const auto now = std::chrono::steady_clock::now();
+                long ms = (long)std::chrono::duration_cast<std::chrono::milliseconds>(nextStep - now).count();
+                if (pending && ms > kDisplayMs) ms = kDisplayMs;
+                if (ms > 0) wake_.waitMs((int)ms);
+            }
+            if (std::chrono::steady_clock::now() >= nextStep)
+            {
+                // one roll step = one sixteenth note at the host tempo (the last known tempo when stopped)
+                const float bpm = bpm_.load(std::memory_order_relaxed);
+                nextStep += std::chrono::microseconds((long long)(15.0e6 / (bpm > 1.0f ? bpm : 120.0f)));
+                if (nextStep < std::chrono::steady_clock::now()) nextStep = std::chrono::steady_clock::now();
+                scrollRoll();
+                displayDirty_.store(true);
+            }
             uint8_t m[3];
             int n = 0;
             while (ring_.pop(m)) { deliver(m); ++n; }
             if (n) alsa_.flush();
-            if (dirty_.exchange(false)) rebuild();
+            if (dirty_.exchange(false)) { rebuild(); displayDirty_.store(true); }
+            // Display: at most one update every kDisplayMs, never from inside a host call.
+            if (displayDirty_.load() || pending)
+            {
+                const auto now = std::chrono::steady_clock::now();
+                if (now - lastPush >= std::chrono::milliseconds(kDisplayMs))
+                {
+                    displayDirty_.store(false);
+                    pushDisplay();
+                    lastPush = now;
+                    pending = false;
+                }
+                else pending = true;
+            }
         }
         uint8_t m[3];
         while (ring_.pop(m)) deliver(m);
@@ -459,6 +580,80 @@ private:
         alsa_.flush();
         alsa_.close();
     }
+
+    static constexpr int kDisplayMs = 10;
+
+    // Worker thread: write the display parameters from the note state and the current table.
+    void pushDisplay()
+    {
+        const scala::RetuneTable& t = tables_[published_.load()];
+        dispSize_.store(t.size);
+        setDisplay(kGridX, 0.5f);
+        for (int g = 0; g < scala::RetuneTable::kMaxGrid; ++g) setDisplay(kGrid0 + g, t.grid[g]);
+        const float w = dispWheel_.load(std::memory_order_relaxed);
+        const int first = getInt(kFirstCh) - 1;
+        for (int i = 0; i < kNumTraces; ++i)
+        {
+            const int c = first + i;
+            float v = 0.0f;
+            if (c < 16 && dispOn_[c].load(std::memory_order_relaxed))
+            {
+                const int key = dispKey_[c].load(std::memory_order_relaxed);
+                float pc = t.pc[key] + (w >= 0.0f ? w * t.up[key] : -w * t.down[key]) / t.periodSemis;
+                pc -= std::floor(pc);
+                v = kTraceFloor + (1.0f - kTraceFloor) * pc;
+            }
+            setDisplay(kTrace0 + i, v);
+        }
+        const int key = lastKey_.load(std::memory_order_relaxed);
+        if (key >= 0 && t.note[key] >= 0)
+        {
+            setDisplayPlain(kLastDeg, (float)t.degree[key]);
+            setDisplayPlain(kLastOct, (float)t.octave[key]);
+            setDisplayPlain(kLastCents, t.pc[key] * t.periodSemis * 100.0f);
+        }
+        // roll: the newest column follows the notes live; older columns come from the history
+        for (int v = 0; v < kNumTraces; ++v) roll_[kRollCols - 1][v] = rollValue(t, first + v, false);
+        for (int c = 0; c < kRollCols; ++c)
+        {
+            setDisplay(kColX0 + c, (c + 0.5f) / kRollCols);
+            for (int v = 0; v < kNumTraces; ++v) setDisplay(kCell0 + c * kNumTraces + v, roll_[c][v]);
+        }
+    }
+
+    // Worker thread. y position of a roll marker for output channel c: the pitch class of the
+    // sounding note, or of a note that started since the last step; 0 (parked) if none.
+    float rollValue(const scala::RetuneTable& t, int c, bool consumeHit)
+    {
+        if (c < 0 || c >= 16) return 0.0f;
+        int key = -1;
+        if (dispOn_[c].load(std::memory_order_relaxed)) key = dispKey_[c].load(std::memory_order_relaxed);
+        const int hit = consumeHit ? hitKey_[c].exchange(-1) : hitKey_[c].load(std::memory_order_relaxed);
+        if (key < 0) key = hit;
+        if (key < 0 || t.note[key] < 0) return 0.0f;
+        const float w = dispWheel_.load(std::memory_order_relaxed);
+        float pc = t.pc[key] + (w >= 0.0f ? w * t.up[key] : -w * t.down[key]) / t.periodSemis;
+        pc -= std::floor(pc);
+        return kRollPark + (1.0f - kRollPark) * pc;
+    }
+
+    // Worker thread, once per step: move every column one place to the left.
+    void scrollRoll()
+    {
+        const scala::RetuneTable& t = tables_[published_.load()];
+        const int first = getInt(kFirstCh) - 1;
+        for (int v = 0; v < kNumTraces; ++v) roll_[kRollCols - 1][v] = rollValue(t, first + v, true);
+        for (int c = 0; c < kRollCols - 1; ++c)
+            for (int v = 0; v < kNumTraces; ++v) roll_[c][v] = roll_[c + 1][v];
+        for (int v = 0; v < kNumTraces; ++v) roll_[kRollCols - 1][v] = rollValue(t, first + v, false);
+    }
+    void setDisplay(int i, float norm)
+    {
+        if (std::fabs(getNormalised(i) - norm) < 1e-6f) return;
+        setNormalised(i, norm);
+        notifyHostParameterChanged(i);
+    }
+    void setDisplayPlain(int i, float plain) { setDisplay(i, param(i).toNormalised(plain)); }
 
     void deliver(const uint8_t* m)
     {
@@ -528,6 +723,19 @@ private:
     uint32_t clock_ = 0;
     float wheel_ = 0.0f;     // incoming bend wheel, -1..1
     bool sustain_ = false;
+
+    // display state, written by the audio thread, read by the worker
+    std::atomic<int>   dispKey_[16] = {};
+    std::atomic<bool>  dispOn_[16] = {};
+    std::atomic<float> dispWheel_{0.0f};
+    std::atomic<int>   lastKey_{-1};
+    std::atomic<int>   dispSize_{12};
+    std::atomic<bool>  displayDirty_{true};
+    std::atomic<int>   hitKey_[16];
+    std::atomic<float> bpm_{120.0f};
+    float roll_[kRollCols][kNumTraces] = {};   // worker thread only
+    std::string gridIds_[scala::RetuneTable::kMaxGrid], gridNames_[scala::RetuneTable::kMaxGrid];
+    std::string traceIds_[kNumTraces], traceNames_[kNumTraces];
 
     MsgRing ring_;
     Wakeup wake_;

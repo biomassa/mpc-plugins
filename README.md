@@ -9,8 +9,9 @@ Plugins for Akai MPC standalone hardware, made with the official [MPC Plugin SDK
 | Plugin | Type | Description |
 |---|---|---|
 | [Scala Retuner](Scala%20Retuner/) | Instrument (silent) | Retunes the notes of its track to a Scala scale. Keygroup and OPx-4 tracks play the retuned notes. |
+| [scalaSeq](scalaSeq/) | Instrument (silent) | A monophonic pitch and gate sequencer for Scala tunings, with lanes and chance operations. It plays MIDI on keygroup and OPx-4 tracks. |
 
-Each plugin folder has a README, a CHANGELOG and a list of known issues.
+Each plugin folder has a README, a CHANGELOG and a list of known issues. Code that more than one plugin uses is in `common/`.
 
 ## Requirements
 

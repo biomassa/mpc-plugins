@@ -166,7 +166,8 @@ inline Mapping linearMapping(int root, double detuneCents)
 }
 
 // Cents of a key relative to the mapping's middle note; false if the key is unmapped.
-inline bool keyCents(const Scale& s, const Mapping& m, int key, double& cents, bool ignoreUnmapped = false)
+inline bool keyCents(const Scale& s, const Mapping& m, int key, double& cents, bool ignoreUnmapped = false,
+                     int* degreeOut = nullptr, int* octaveOut = nullptr)
 {
     const int n = s.size();
     auto degreeCents = [&](int d) {
@@ -175,7 +176,14 @@ inline bool keyCents(const Scale& s, const Mapping& m, int key, double& cents, b
         return q * s.cents[(size_t)n] + s.cents[(size_t)r];
     };
     const int offset = key - m.middleNote;
-    if (m.mapSize == 0) { cents = degreeCents(offset); return true; }
+    if (m.mapSize == 0)
+    {
+        cents = degreeCents(offset);
+        const int q0 = detail::floorDiv(offset, n);
+        if (degreeOut) *degreeOut = offset - q0 * n;
+        if (octaveOut) *octaveOut = q0;
+        return true;
+    }
     if (!ignoreUnmapped && (key < m.firstNote || key > m.lastNote)) return false;
     int q = detail::floorDiv(offset, m.mapSize);
     int r = offset - q * m.mapSize;
@@ -187,6 +195,8 @@ inline bool keyCents(const Scale& s, const Mapping& m, int key, double& cents, b
     }
     int octDeg = m.octaveDegree > 0 ? m.octaveDegree : n;
     cents = q * degreeCents(octDeg) + degreeCents(deg);
+    if (degreeOut) *degreeOut = deg - detail::floorDiv(deg, n) * n;
+    if (octaveOut) *octaveOut = q + detail::floorDiv(deg, n);
     return true;
 }
 
@@ -212,7 +222,27 @@ struct RetuneTable
     float  down[128];     // wheel fully down: extra semitones (<= 0)
     float  perSemiUp;     // bend units per semitone, upward (curve and Bend Up range)
     float  perSemiDown;   // bend units per semitone, downward (Bend Down range)
+
+    // Display data (ROLL page). Read by the worker thread only.
+    static constexpr int kMaxGrid = 31;
+    float   pc[128];          // position of the key in the period, 0..1 (pitch class)
+    int16_t degree[128];      // scale degree 0..size-1
+    int8_t  octave[128];      // period number relative to degree 0 of the mapping
+    float   periodSemis;      // period in semitones
+    int     size;             // number of scale degrees
+    int     gridCount;        // lines in grid[] (min(size, kMaxGrid))
+    float   grid[kMaxGrid];   // position of each scale degree in the period, 0..1
 };
+
+// 14-bit bend for an offset in cents, for a target with the given ranges and curve.
+inline int bendValue(double cents, int rangeUp, int rangeDown, BendCurve curve)
+{
+    double v;
+    if (cents >= 0.0) v = cents / (rangeUp * 100.0) * (curve == BendCurve::Opx4 ? 8064.0 : 8192.0);
+    else              v = cents / (rangeDown * 100.0) * 8192.0;
+    long r = std::lround(v);
+    return (int)(r > 8191 ? 8191 : (r < -8192 ? -8192 : r));
+}
 
 // 14-bit bend for `key` with the wheel at w (-1..1). Symmetric curve: value/8192 of the range
 // both ways (keygroups). OPx-4: up uses value/8064 (measured on OPx-4, MPC 3.10.1), down /8192.
@@ -243,11 +273,24 @@ inline void buildTable(const Scale& s, const Mapping& m, int rangeUp, int rangeD
             avgStep = octCents / m.mapSize / 100.0;
         }
     }
+    const double period = s.valid() ? s.cents[(size_t)s.size()] : 1200.0;
+    t.periodSemis = (float)(period / 100.0);
+    t.size = s.valid() ? s.size() : 12;
+    t.gridCount = t.size < RetuneTable::kMaxGrid ? t.size : RetuneTable::kMaxGrid;
+    for (int g = 0; g < RetuneTable::kMaxGrid; ++g)
+        t.grid[g] = (g < t.gridCount && s.valid()) ? (float)(s.cents[(size_t)g] / period) : 0.0f;
     for (int k = 0; k < 128; ++k)
     {
         t.note[k] = -1; t.resid[k] = 0; t.up[k] = 0; t.down[k] = 0;
+        t.pc[k] = 0; t.degree[k] = 0; t.octave[k] = 0;
         const double p = keyPitch(s, m, k);
         if (std::isnan(p)) continue;
+        {
+            double c = 0; int d = 0, o = 0;
+            keyCents(s, m, k, c, false, &d, &o);
+            double f = c / period - std::floor(c / period);
+            t.pc[k] = (float)f; t.degree[k] = (int16_t)d; t.octave[k] = (int8_t)o;
+        }
         const long n = std::lround(p);
         if (n < 0 || n > 127) continue;
         t.note[k] = (int8_t)n;

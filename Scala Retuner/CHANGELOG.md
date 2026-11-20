@@ -7,6 +7,25 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-21
+
+### Added
+
+- The ROLL page: a scrolling piano roll in the pitch classes of the scale.
+  - One horizontal line for each scale degree in one period, with the degree number at the left. Degree 0 is the brighter bottom line. Up to 31 lines.
+  - 16 columns of note markers, one color for each of the first 8 output channels. The markers scroll to the left by one column each sixteenth note, at the tempo of the MPC. When the sequencer is stopped, they scroll at the last tempo (120 bpm if none).
+  - The newest column (at the right) follows the notes and the bend wheel at once. A note that is shorter than one step also gets a marker.
+  - The top row shows the last note as scale degree, period number and cents (for example `7\22`, `Oct +0`, `381.8c`).
+  - Q-Links 1-4 control Scale, Mapping, Root and In Bend.
+- Display parameters 11-197: Grid X, Grid 1-31, Trace 1-8, Last Deg, Last Oct, Last Cents, Col X 1-16 and 128 roll cells (C1 V1 to C16 V8). The plugin writes them. If you change them, the plugin writes them again.
+- `skin/make_skin.py` makes the skin in `skins/`: the RETUNE page from `ui.json` and the ROLL page.
+- CPU, measured on the MPC One G2 with a dense pattern: the ROLL page adds about 35% of one CPU core (about 4% of all 8 cores) while it is on the screen. Other pages add nothing measurable. The plugin itself uses less than 0.01% CPU.
+
+### Changed
+
+- The skin is hand-written now (`skins/`). After a change to `ui.json` or to the parameters, run `skin/make_skin.py` before the build.
+- The worker thread sends display updates at most each 10 ms, and only for the values that changed.
+
 ## [1.1.0] - 2026-11-20
 
 ### Added

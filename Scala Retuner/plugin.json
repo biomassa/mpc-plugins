@@ -1,7 +1,7 @@
 {
   "name": "Scala Retuner",
   "manufacturer": "blackdingus",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "format": "vst2",
   "kind": "instrument",
   "uid": "Bi2r",

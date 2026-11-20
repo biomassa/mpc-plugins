@@ -1,5 +1,13 @@
 # Known issues
 
+## ROLL page
+
+- **CPU:** while the ROLL page is on the screen, the MPC uses more CPU to draw the markers: about 35% of one core with a dense pattern (MPC One G2). With other pages on the screen there is no measurable increase.
+- **Automation:** the display parameters change while you play. If the track records automation, the MPC can record these changes. Not tested.
+- The display parameters (11-197) show in the parameter and automation lists of the MPC.
+- If you touch the roll area, the touched marker or line can move. The plugin puts it back at the next update.
+- The MPC One G2 does not draw the Plotter widget, and the SDK documents it as "less tested". The ROLL page uses XYPad markers instead.
+
 ## Sustain does not release on keygroup tracks
 
 - **Found:** 2026-11-20, MPC One G2, MPC 3.10.1.12, Scala Retuner 1.1.0.

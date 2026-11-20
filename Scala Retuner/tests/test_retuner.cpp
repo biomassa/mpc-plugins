@@ -212,6 +212,62 @@ int main()
         sendMidi(p, {mpc::MidiEvent::noteOff(0, 66)});
         takeLog(p);
 
+        // --- ROLL page display parameters (22edo, Voices 3, First Ch 1) ---
+        CHECK(std::fabs(p.get(kGrid0 + 1) - 1.0f / 22) < 1e-3, "grid line 2 at 1/22: %f", p.get(kGrid0 + 1));
+        CHECK(std::fabs(p.get(kGrid0 + 21) - 21.0f / 22) < 1e-3, "grid line 22 at 21/22");
+        CHECK(p.get(kGrid0 + 22) == 0.0f, "unused grid line parked at 0");
+        CHECK(std::fabs(p.get(kGridX) - 0.5f) < 1e-6, "grid x");
+        for (int i = 0; i < kNumTraces; ++i) CHECK(p.get(kTrace0 + i) == 0.0f, "trace %d silent", i);
+        sendMidi(p, {mpc::MidiEvent::noteOn(0, 67, 100)});
+        log = takeLog(p);
+        const int c67 = chOf(log.back());
+        const float want = kTraceFloor + (1 - kTraceFloor) * 7.0f / 22;
+        CHECK(std::fabs(p.get(kTrace0 + c67) - want) < 1e-3, "trace of key 67 = degree 7: %f vs %f", p.get(kTrace0 + c67), want);
+        std::string txt;
+        p.formatValue(kLastDeg, p.get(kLastDeg), txt);
+        CHECK(txt == "7\\22", "Last Deg text: %s", txt.c_str());
+        p.formatValue(kLastCents, p.get(kLastCents), txt);
+        CHECK(txt == "381.8c", "Last Cents text: %s", txt.c_str());
+        p.formatValue(kLastOct, p.get(kLastOct), txt);
+        CHECK(txt == "Oct +0", "Last Oct text: %s", txt.c_str());
+        // wheel full up on a held note: the trace moves 2 steps (In Bend 2)
+        mpc::MidiEvent up = pb;
+        sendMidi(p, {up});
+        takeLog(p);
+        CHECK(std::fabs(p.get(kTrace0 + c67) - (kTraceFloor + (1 - kTraceFloor) * 9.0f / 22)) < 1e-3, "trace follows the wheel");
+        sendMidi(p, {pb0, mpc::MidiEvent::noteOff(0, 67)});
+        takeLog(p);
+        CHECK(p.get(kTrace0 + c67) == 0.0f, "trace silent after note-off");
+        // key 60 - 22 = 38: degree 0, one period down
+        sendMidi(p, {mpc::MidiEvent::noteOn(0, 38, 100), mpc::MidiEvent::noteOff(0, 38)});
+        takeLog(p);
+        p.formatValue(kLastOct, p.get(kLastOct), txt);
+        CHECK(txt == "Oct -1", "Last Oct one period down: %s", txt.c_str());
+
+        // --- scrolling roll: a note appears in the newest column, then moves left at each step ---
+        {
+            const float rp = kRollPark + (1 - kRollPark) * 7.0f / 22;
+            sendMidi(p, {mpc::MidiEvent::noteOn(0, 67, 100)});
+            log = takeLog(p);
+            const int v67 = chOf(log.back()) - (p.getInt(kFirstCh) - 1);
+            CHECK(std::fabs(p.get(kCell0 + (kRollCols - 1) * kNumTraces + v67) - rp) < 1e-3, "newest column shows the note");
+            sendMidi(p, {mpc::MidiEvent::noteOff(0, 67)});
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));   // > 2 steps at 120 bpm (125 ms)
+            float older = 0;
+            for (int c = 0; c < kRollCols - 1; ++c) older = std::max(older, p.get(kCell0 + c * kNumTraces + v67));
+            CHECK(std::fabs(older - rp) < 1e-3, "the note moved into an older column");
+            CHECK(p.get(kCell0 + (kRollCols - 1) * kNumTraces + v67) == 0.0f, "newest column empty after note-off");
+            CHECK(std::fabs(p.get(kColX0) - 0.5f / kRollCols) < 1e-3, "column 1 x");
+            // a note shorter than one step still appears
+            sendMidi(p, {mpc::MidiEvent::noteOn(0, 60, 100), mpc::MidiEvent::noteOff(0, 60)});
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            bool seen = false;
+            for (int c = 0; c < kRollCols; ++c) for (int v = 0; v < kNumTraces; ++v)
+                if (std::fabs(p.get(kCell0 + c * kNumTraces + v) - kRollPark) < 1e-3) seen = true;
+            CHECK(seen, "short note captured by the roll");
+            takeLog(p);
+        }
+
         // state round trip into a fresh instance whose list may differ
         std::vector<uint8_t> st;
         p.saveExtraState(st);

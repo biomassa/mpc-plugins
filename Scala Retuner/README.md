@@ -67,32 +67,19 @@ If the MIDI Monitor of a target track is Auto and you select that track, the tra
 | 8 | First Ch | 1-16 | The first output MIDI channel. |
 | 9 | Voices | 1-16 | The number of output channels. This is the polyphony. |
 | 10 | In Bend | 0-24 scale steps | The range of your bend wheel in scale steps. 0 disables the wheel. |
+| 11-197 | Grid X, Grid 1-31, Trace 1-8, Last Deg, Last Oct, Last Cents, Col X 1-16, C1 V1 to C16 V8 | | Display parameters for the ROLL page. The plugin writes them. Do not change them. |
 
-### Bend range and accuracy
+## ROLL page
 
-- One bend step is the bend range divided by 8192. At ±2 semitones, one step is 0.02 cents. At ±24 semitones, one step is 0.3 cents.
-- The retuning bend is at most ±0.5 semitone. The wheel bend adds to it. Thus Bend Up and Bend Down must be larger than the largest wheel bend plus 0.5 semitone. Else the plugin limits the bend.
-- Curve: on MPC 3.10.1, keygroups use value/8192 of the range in both directions. OPx-4 uses value/8064 of the range up and value/8192 down. Other Akai synths are not measured.
+The ROLL page is a scrolling piano roll in the pitch classes of the scale.
 
-### Bend wheel
+- Each horizontal line is one scale degree in one period. The number at the left is the degree. The bottom line (brighter) is degree 0. The top of the area is the next period. The page shows up to 31 lines.
+- The colored markers are the notes. Each color is one output channel, from First Ch to First Ch + 7. A marker shows the pitch class of the note. The newest column is at the right and moves with the bend wheel.
+- The markers scroll to the left by one column each sixteenth note, at the tempo of the MPC. 16 columns show one bar of 4/4. When the sequencer is stopped, the markers scroll at the last tempo (120 bpm if none).
+- The top row shows the last note: scale degree (for example `7\22`), period number relative to the root (`Oct +0`), and cents above degree 0 (`381.8c`).
+- Q-Links 1-4 control Scale, Mapping, Root and In Bend.
 
-- Wheel fully up gives the pitch of the key that is In Bend steps higher. Wheel fully down gives the pitch of the key that is In Bend steps lower.
-- Values between are interpolated in cents.
-- The wheel bend applies to all channels that played a note, also during the release.
-
-### Forwarded messages
-
-- All CCs go to all output channels in use.
-- Channel aftertouch goes to all output channels in use.
-- Polyphonic aftertouch goes to the channel of its note.
-- Sustain (CC64): a note that you release while the pedal is down keeps its channel until the pedal is up. Keygroup tracks do not release on pedal up. See [known issues](knownIssues.md).
-- All Notes Off (CC120, CC123) releases all notes.
-- Program change and SysEx are not forwarded.
-
-### Voice allocation
-
-- A new note uses the free channel that was released first. Thus the release of a note does not get the bend of the next note.
-- If all channels are in use, the oldest note stops and its channel plays the new note.
+The ROLL page uses more CPU while it is on the screen (see [known issues](knownIssues.md)). Other pages do not.
 
 ## Scales
 
@@ -120,11 +107,15 @@ From the SDK root (`sdk/`):
 
 ```sh
 python3 tools/build.py "plugins/Scala Retuner"
+python3 "plugins/Scala Retuner/skin/make_skin.py"
+python3 tools/build.py "plugins/Scala Retuner"
 .sdk-tools/host_sim "plugins/Scala Retuner/build/native/scala-retuner.dylib" test --wav "plugins/Scala Retuner/build/test.wav"
 sh "plugins/Scala Retuner/tests/run.sh"
 ```
 
 On Linux, the native library is `scala-retuner.so`.
+
+The skin in `skins/` is hand-written, so the build does not run the SDK generator. `skin/make_skin.py` makes the skin again: the RETUNE page from `ui.json`, and the ROLL page. It needs `build/params.json`, so build one time before you run it. Run it after each change to `ui.json` or to the parameters.
 
 The host simulator reports silence. This is correct, because the plugin makes no sound.
 
@@ -136,6 +127,7 @@ The host simulator reports silence. This is correct, because the plugin makes no
 - CC, aftertouch and sustain forwarding.
 - Channel rotation and voice stealing.
 - Save and load of the project state.
+- The display parameters and the scrolling of the ROLL page.
 
 ## License
 
