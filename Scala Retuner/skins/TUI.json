@@ -46,7 +46,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -143,7 +143,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -318,7 +318,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -486,7 +486,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -654,7 +654,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -830,7 +830,7 @@
                             }
                         },
                         "ignoreMousePresses": false,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -983,7 +983,7 @@
                             }
                         },
                         "ignoreMousePresses": true,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -1045,7 +1045,7 @@
                             }
                         },
                         "ignoreMousePresses": true,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -1107,7 +1107,7 @@
                             }
                         },
                         "ignoreMousePresses": true,
-                        "disableCoarseDataWheel": false,
+                        "disableCoarseDataWheel": true,
                         "componentsData": [
                             {
                                 "version": 2,
@@ -1201,7 +1201,7 @@
                         }
                     },
                     "ignoreMousePresses": false,
-                    "disableCoarseDataWheel": false,
+                    "disableCoarseDataWheel": true,
                     "componentsData": [
                         {
                             "version": 2,
@@ -1219,7 +1219,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 1"
+                                        "value": "DisableCoarseIncrement/Parameter 1"
                                     }
                                 ]
                             },
@@ -1248,7 +1248,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 5"
+                                        "value": "DisableCoarseIncrement/Parameter 5"
                                     }
                                 ]
                             },
@@ -1277,7 +1277,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 8"
+                                        "value": "DisableCoarseIncrement/Parameter 8"
                                     }
                                 ]
                             },
@@ -1344,7 +1344,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 2"
+                                        "value": "DisableCoarseIncrement/Parameter 2"
                                     }
                                 ]
                             },
@@ -1373,7 +1373,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 6"
+                                        "value": "DisableCoarseIncrement/Parameter 6"
                                     }
                                 ]
                             },
@@ -1402,7 +1402,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 9"
+                                        "value": "DisableCoarseIncrement/Parameter 9"
                                     }
                                 ]
                             },
@@ -1431,7 +1431,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 3"
+                                        "value": "DisableCoarseIncrement/Parameter 3"
                                     }
                                 ]
                             },
@@ -1460,7 +1460,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 7"
+                                        "value": "DisableCoarseIncrement/Parameter 7"
                                     }
                                 ]
                             },
@@ -1565,7 +1565,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 0"
+                                        "value": "DisableCoarseIncrement/Parameter 0"
                                     }
                                 ]
                             },
@@ -1594,7 +1594,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 4"
+                                        "value": "DisableCoarseIncrement/Parameter 4"
                                     }
                                 ]
                             },
@@ -1623,7 +1623,7 @@
                                 "map": [
                                     {
                                         "key": "Data",
-                                        "value": "Parameter 10"
+                                        "value": "DisableCoarseIncrement/Parameter 10"
                                     }
                                 ]
                             },
@@ -1666,7 +1666,7 @@
             }
         },
         "ignoreMousePresses": false,
-        "disableCoarseDataWheel": false,
+        "disableCoarseDataWheel": true,
         "componentsData": [
             {
                 "version": 2,

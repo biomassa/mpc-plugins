@@ -7,6 +7,24 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-21
+
+### Removed
+
+- The Q-Link action change of 1.2.2. It was not based on the SDK documentation, and it changed nothing on the MPC. The cause of the wrong Q-Link assignments is not known yet; see knownIssues.md.
+
+## [1.2.2] - 2026-11-21
+
+### Fixed
+
+- Touching a control did not select its Q-Link bank, so the Q-Links changed other parameters than the touched one. The fine knob step (1.3.1 / 1.2.1) wrapped each control's handle in DisableCoarseIncrement, and the MPC did not find the Q-Link bank of a wrapped handle. The Q-Link action now uses the plain parameter.
+
+## [1.2.1] - 2026-11-21
+
+### Changed
+
+- Knobs, faders and the data wheel move by the fine step without Shift. Before, the normal step was too coarse. Shift gives no finer step.
+
 ## [1.2.0] - 2026-11-21
 
 ### Added

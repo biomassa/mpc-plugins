@@ -1,5 +1,10 @@
 # Known issues
 
+## Knob steps
+
+- All controls use the fine step without Shift (the `DisableCoarseIncrement` modifier and `disableCoarseDataWheel` in the skin). The SDK documents these for touch controls and the data wheel. Not known: if the hardware Q-Links also use the fine step.
+- Shift gives no finer step. Whole-number parameters already move by 1 for each click. For continuous parameters, a finer Shift step needs the MPC to read step sizes from the plugin (VST2 parameter properties); not tested.
+
 ## ROLL page
 
 - **CPU:** while the ROLL page is on the screen, the MPC uses more CPU to draw the markers: about 35% of one core with a dense pattern (MPC One G2). With other pages on the screen there is no measurable increase.

@@ -12,6 +12,7 @@ Run from the SDK root after a build (it needs build/params.json):
 The build copies skins/ as it is and does not run the generator.
 """
 import json
+import re
 import os
 import shutil
 import struct
@@ -152,6 +153,14 @@ def roll_tab():
             "componentDefinition": root, "qlinkBoundsData": []}
 
 
+def fine_by_default(tui):
+    """Knobs, faders and the data wheel move by the fine step without Shift (user request
+    2026-11-21): disableCoarseDataWheel and the documented DisableCoarseIncrement modifier on each
+    control's Data handle (ui-reference 4.1, 7.2: both affect the data wheel)."""
+    tui = tui.replace('"disableCoarseDataWheel": false', '"disableCoarseDataWheel": true')
+    return re.sub(r'("key": "Data",\s*"value": ")(Parameter \d+")', r'\1DisableCoarseIncrement/\2', tui)
+
+
 def main():
     params = os.path.join(PROJECT, "build", "params.json")
     if not os.path.exists(params):
@@ -170,6 +179,7 @@ def main():
         assert cut.endswith("]")
         tab = json.dumps(roll_tab(), indent=4)
         tui = cut[:-1].rstrip() + ",\n" + tab + "\n]\n}\n}\n"
+        tui = fine_by_default(tui)
         if os.path.isdir(OUT):
             shutil.rmtree(OUT)
         os.makedirs(OUT)
