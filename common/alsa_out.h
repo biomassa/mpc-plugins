@@ -20,7 +20,15 @@
 #include <cstdint>
 #include <cstring>
 
-#if defined(__linux__)
+// MPC_NO_ALSA: build without the ALSA port (used by tests/bench.cpp on the MPC, so the bench
+// cannot reach the MPC's tracks).
+#if defined(__linux__) && !defined(MPC_NO_ALSA)
+  #define MPC_HAVE_ALSA 1
+#else
+  #define MPC_HAVE_ALSA 0
+#endif
+
+#if MPC_HAVE_ALSA
   #include <dlfcn.h>
 #endif
 
@@ -57,7 +65,7 @@ public:
 
     bool open(const char* clientName, const char* portName)
     {
-#if defined(__linux__)
+#if MPC_HAVE_ALSA
         lib_ = dlopen("libasound.so.2", RTLD_NOW | RTLD_LOCAL);
         if (!lib_) return false;
         if (!sym(open_, "snd_seq_open") || !sym(close_, "snd_seq_close") ||
@@ -154,7 +162,7 @@ private:
 
     template <typename F> bool sym(F& f, const char* name)
     {
-#if defined(__linux__)
+#if MPC_HAVE_ALSA
         f = reinterpret_cast<F>(dlsym(lib_, name));
         return f != nullptr;
 #else
@@ -163,7 +171,7 @@ private:
     }
     void unload()
     {
-#if defined(__linux__)
+#if MPC_HAVE_ALSA
         if (lib_) dlclose(lib_);
 #endif
         lib_ = nullptr;
