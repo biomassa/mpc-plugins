@@ -1,0 +1,17 @@
+{
+  "name": "touchProbe",
+  "manufacturer": "blackdingus",
+  "version": "1.1.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "BoIh",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/touchprobe-arm32.so",
+  "file64": "VST/touchprobe-arm64.so",
+  "description": "touchProbe: a 4-voice synth for the MPC. Describe your plugin here.",
+  "author": "blackdingus",
+  "url": "",
+  "license": "MIT"
+}

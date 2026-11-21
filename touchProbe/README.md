@@ -1,0 +1,20 @@
+# touchProbe
+
+An instrument plugin for Akai MPC standalone hardware, by blackdingus.
+
+_Describe what the plugin does here. This file is included in the distributable zip._
+
+## Build
+
+```
+python tools/build.py plugins/touchProbe
+python tools/package.py plugins/touchProbe
+```
+
+## Project layout
+
+- `plugin.json` - manifest (name, manufacturer, uid). The `uid` must match the C++ `uniqueId`.
+- `src/TouchProbe.cpp` - the plugin source (parameters, MIDI handling, DSP).
+- `ui.json` - which parameters appear on the MPC screen, in which order.
+- `build/` - build output (the deployable `blackdingus - VST - touchProbe` folder lives here).
+- `dist/` - zips produced by `package.py`.

@@ -1,0 +1,14 @@
+{
+  "kit": "mono",
+  "qlinkGroups": "columns",
+  "pages": [
+    {
+      "name": "INFO",
+      "controls": [
+        {"param": "Volume", "widget": "knob"},
+        "empty", "empty", "empty", "empty", "empty", "empty", "empty",
+        "empty", "empty", "empty", "empty", "empty", "empty", "empty", "empty"
+      ]
+    }
+  ]
+}
