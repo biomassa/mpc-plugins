@@ -129,6 +129,36 @@ int main()
         CHECK(rises == 2 && mid > 62 && mid < 70, "glide midway: %f", mid);
     }
 
+    // 7b. GLIDE op (2.4): 100 %, amount 50 % of the 2-step note = a 1-step glide; NO GLIDE cancels the note's glide
+    {
+        auto pitchAt = [&](double atStep) {
+            buildTables(s, t, T);
+            Engine g;
+            const double sr = 8000;
+            float p = 0;
+            for (long i = 0; i < 8000; ++i) { EngineOut o = g.tick(i / sr, true, T, sr); if (i == (long)(sr * atStep / 4)) p = o.pitch; }
+            return p;
+        };
+        s = Sequence(); s.steps = 4; s.rEnd = 3;
+        s.insert(note(0, 2, 0));
+        { Note n = note(2, 2, 12); n.ch[0].op = 28; n.ch[0].prob = 1; n.ch[0].amt = 50; s.insert(n); }
+        const float half = pitchAt(2.5), done = pitchAt(3.2);
+        CHECK(std::fabs(half - 66) < 0.3 && std::fabs(done - 72) < 1e-3, "GLIDE 50%% of 2 steps: mid %f (want 66), after %f", half, done);
+        s = Sequence(); s.steps = 4; s.rEnd = 3;
+        s.insert(note(0, 2, 0));
+        { Note n = note(2, 2, 12); n.gl = 0.5f; n.ch[0].op = 29; n.ch[0].prob = 1; s.insert(n); }
+        const float now = pitchAt(2.1);
+        CHECK(std::fabs(now - 72) < 1e-3, "NO GLIDE: the note starts at its pitch: %f", now);
+    }
+
+    // 7c. DELAY % (2.4): 50 % of a step -> the note at step 1 starts at 1.5
+    s = Sequence(); s.steps = 4; s.rEnd = 3;
+    { Note n = note(1, 1, 0); n.ch[0].op = 30; n.ch[0].prob = 1; n.ch[0].amt = 50; s.insert(n); }
+    buildTables(s, t, T);
+    e = Engine();
+    h = run(e, T, 1, 8000.0, 1.0);   // one step = 1/4 s
+    CHECK(h.size() == 1 && std::fabs(h[0].t - 1.5 / 4) < 0.002, "DELAY 50%%: starts at 1.5 steps: %f", h.empty() ? -1 : h[0].t * 4);
+
     // 8. swing 75%: the 2nd step of a pair starts at 3/4 of the pair
     s = Sequence(); s.steps = 4; s.rEnd = 3; s.swing = 75;
     s.insert(note(0, 1, 0)); s.insert(note(1, 1, 2));

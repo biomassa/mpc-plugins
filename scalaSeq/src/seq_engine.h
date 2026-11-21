@@ -169,7 +169,7 @@ public:
 
         if (fire && flen > 0)
         {
-            float cv = fs->vel, clen = flen, dly = 0;
+            float cv = fs->vel, clen = flen, dly = 0, cgl = fs->glide, glFrac = -1;   // glFrac >= 0: GLIDE op (share of the hit)
             int crat = std::max(fs->rat, 1), pidx = fs->pidx;
             bool muted = false, tie = false, hold = false;
             const float room = fs->room;
@@ -207,6 +207,9 @@ public:
                     case 24: hold = true; break;
                     case 25: case 26: pidx = (int)amt; hold = false; break;
                     case 27: cv = std::max(0.0f, std::min(1.0f, cv + (rnd() * 2 - 1) * amt / 100)); break;
+                    case 28: glFrac = amt / 100; break;          // GLIDE: glide over this share of the hit
+                    case 29: glFrac = -1; cgl = 0; break;        // NO GLIDE
+                    case 30: dly = amt / 100; break;             // DELAY %: a share of a step
                     default: break;
                 }
                 if (sdir != 0 && scnt > 0 && pidx >= 0 && pidx < kPitchN)
@@ -233,7 +236,7 @@ public:
             if (!muted)
             {
                 qon_ = 1; qnew_ = 1; qd_ = dly; qv_ = cv; qlen_ = clen; qrat_ = crat; qpi_ = pidx;
-                qduty_ = fs->duty; qfade_ = fs->fade; qglide_ = fs->glide; qmidi_ = fs->midi;
+                qduty_ = fs->duty; qfade_ = fs->fade; qglide_ = glFrac >= 0 ? glFrac * clen : cgl; qmidi_ = fs->midi;
                 qtie_ = tie; qhold_ = hold;
             }
         }

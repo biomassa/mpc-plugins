@@ -8,17 +8,25 @@
 // Signal flow
 //   MPC song position -> loop phase -> Engine::tick() per sample (gate, velocity, pitch, step)
 //     -> MIDI: note on at a gate rise, note off at a fall, pitch bend for glides
-//     -> lock-free queue -> worker thread -> ALSA sequencer port -> target tracks
+//     -> lock-free queue -> MIDI thread (real-time priority) -> ALSA sequencer port
 //   Pads / keys on this track: step entry at the cursor (when Step Entry is on) and preview.
 //
-// Threads
-//   audio thread: owns the 32 sequences, applies knob edits and step entry, runs the engine.
-//   worker:       loads scale files, sends MIDI to ALSA, writes the display parameters
-//                 (grid cells, row labels, playhead, cursor, knob values after a selection).
-//   UI thread:    project save / load (a copy made by the audio thread; applied in reset()).
+// The SEQ page (2.0) is a piano roll drawn from XYPad markers that the plugin places through
+// display parameters. Touch comes from invisible XYPads whose handles use ResetOnGestureEnd:
+// the MPC returns both values to 0 when the finger lifts, so press, drag and release are exact.
+//   roll:   press-drag on empty = draw a note; on a note: body = move, right third = length;
+//           double tap = delete
+//   ruler:  drag sideways = scroll, up/down = zoom (Steps/Page)
+//   labels: drag up/down = scroll the rows
+//   lane:   drag a velocity bar = velocity
+//   FREE:   while held (second finger), drags do not snap
 //
-// CPU: per sample the engine does comparisons and a few multiplies. Table rebuilds, chance rolls
-// and display work happen only on edits, per note, or on the worker.
+// Threads
+//   audio thread: owns the 32 sequences, applies knob and touch edits, runs the engine, computes
+//                 the display values.
+//   MIDI thread:  sends the queued MIDI to ALSA.
+//   worker:       loads scale files and tells the host which display values changed.
+//   UI thread:    project save / load (a copy made by the audio thread; applied in reset()).
 
 #include "mpc_plugin.h"
 #include "seq_engine.h"
@@ -32,48 +40,72 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#if defined(__linux__)
+  #include <pthread.h>
+  #include <sched.h>
+#endif
 
 namespace {
 
 using namespace seq;
 
+constexpr int kRows = 16;
+constexpr int kShown = 32;          // notes drawn exactly on one screen
+constexpr int kPieces = 11;         // bar pieces of 1, 2, 4 ... 1024 px
+constexpr int kGaps = 7;            // ratchet gaps per note (8 ratchets)
+constexpr int kStepLines = 65, kSnapLines = 89, kGrpLines = 65, kNums = 64;
+
 enum ParamIndex
 {
     // SETUP
-    kVelocity = 0, kSequence, kSteps, kRangeStart, kRangeEnd, kSwing, kRate, kDirection, kSnap,
+    kVelocity = 0, kSteps, kRangeStart, kRangeEnd, kSwing, kRate, kDirection, kSnap,
     kScale, kRoot, kRootTune, kFirstCh, kVoices, kBendUp, kBendDown, kCurve, kPtnMode,
-    // NOTE
-    kNote, kStart, kLength, kDegree, kVel, kGlide, kRatch, kFade, kDuty, kCursor, kEntryLen,
-    kStepEntry, kDelete,
+    kGroup, kZoom, kPadNote,
+    // NOTE (knobs)
+    kNoteSel, kDeg, kPeriod, kMove, kLen, kNudge, kVel, kGlide, kRatch, kFade, kDuty,
+    kCursor, kEntryLen, kStepEntry, kDelete,
+    // VIEW (knobs)
+    kViewLow, kViewStart, kSequence,
     // CHANCE: 4 lanes x (op, prob, ptn, amount)
     kLane0,
     // MASK
     kMask0 = kLane0 + 4 * kLanes,
-    // VIEW
-    kViewLow = kMask0 + 31, kPage,
-    // DISPLAY (written by the plugin)
-    kRow0, kPlayX = kRow0 + 16, kCursorX, kLineY,
-    // 1.2: the notes as XYPad markers, one set for each quarter-step column of the page
-    kColX0, kMarkA0 = kColX0 + 64, kMarkB0 = kMarkA0 + 64, kMarkS0 = kMarkB0 + 64, kEndX = kMarkS0 + 64,
-    // appended in 1.1: touch surface and pads
-    kTouchX, kTouchY, kPadNote, kLastKey,
-    // 1.2: rows sized by cents: 17 row lines, 3 period lines, degree labels (31 degrees x 3 copies)
+    // texts (written by the plugin)
+    kLastKey = kMask0 + 31, kDegText, kViewText, kFreeLit,
+    // touch surfaces (ResetOnGestureEnd: 0, 0 = no finger)
+    kRollTX, kRollTY, kRulTX, kRulTY, kLabTX, kLabTY, kVelTX, kVelTY, kFreeTX, kFreeTY,
+    // display markers (written by the plugin)
+    kLineY, kPlayX, kCursorX, kEndX,
     kRowLine0, kPerLine0 = kRowLine0 + 17, kLab0 = kPerLine0 + 3,
-    kNumParamsEnd = kLab0 + 31 * 3,
-    kNumParams = kNumParamsEnd
+    kStepLine0 = kLab0 + 31 * 3, kSnapLine0 = kStepLine0 + kStepLines, kGrpLine0 = kSnapLine0 + kSnapLines,
+    kNumX0 = kGrpLine0 + kGrpLines,
+    kNoteY0 = kNumX0 + kNums, kPieceX0 = kNoteY0 + kShown, kNotchX0 = kPieceX0 + kShown * kPieces,
+    kGapX0 = kNotchX0 + kShown, kGlideX0 = kGapX0 + kShown * kGaps, kChanceX0 = kGlideX0 + kShown,
+    kSelY = kChanceX0 + kShown, kSelPieceX0, kSelNotchX = kSelPieceX0 + kPieces,
+    kVelX0, kVelY0 = kVelX0 + kShown, kSelVelX = kVelY0 + kShown, kSelVelY,
+    // 2.1: delay of the scheduled MIDI output
+    kMidiDelay,
+    // 2.3: chance lanes of the selected note as text (SEQ page), clear switches (SETUP page)
+    kChanceText0, kClearNote = kChanceText0 + kLanes, kClearAll,
+    // 2.3.1: the selected note's marks, drawn above its highlight
+    kSelGapX0, kSelGlideX = kSelGapX0 + kGaps, kSelChanceX,
+    kNumParams
 };
-constexpr int kFirstEdit = kSequence, kLastEdit = kPage;
-constexpr int kRows = 16, kCols = 64;
-// Note markers: the XYPad is the grid plus a masked strip below it (skin: PARKY) where unused
-// markers wait at y = 0. Row r (0 = bottom) is at y = kMarkPark + (r + 0.5) / 16 * (1 - kMarkPark).
-constexpr float kMarkPark = 30.0f / (480.0f + 30.0f);
-// cell frames: 0 empty, 1 note start, 2 note continues, 3 selected start, 4 selected continues,
-//              5 beyond the last step, 6 empty row outside the scale mask
-constexpr float kTouchIdle = 1.0f;   // touch surface rest position (top right): every tap then changes the value
-constexpr int kTouchReleaseMs = 150;  // no movement for this long = the finger is up
-constexpr int kTouchSettleMs = 15;    // wait for both coordinates of a new touch
-constexpr float kParkX = 1.0f;   // display x for a hidden playhead / cursor (under the mask)
-constexpr float kGridFrac = 1152.0f / 1192.0f;   // the grid's share of the XYPad width (skin: GW / (GW + PARK))
+constexpr int kFirstEdit = kSteps, kLastEdit = kSequence;
+
+// ---- SEQ page geometry in pixels (must match skin/make_skin.py) -------------------------------
+constexpr float kGW = 880, kGH = 476;            // the roll
+constexpr float kPARK = 40;                      // masked strip right of the roll (parked lines)
+constexpr float kPARKT = 44;                     // labels / row lines park above the roll (masked)
+constexpr float kOFF = 1100;                     // x-parked markers: pad starts kOFF px left of the roll
+constexpr float kNoteH = 24;
+constexpr float kNotchW = 4, kGapW = 2, kBadgeW = 16, kNumW = 40, kVelW = 5, kVelH = 60, kFreeW = 272;
+constexpr float kRulerPadH = 2628;               // ruler touch pad height (tall, so drags have room)
+constexpr float kMinLinePx = 10;                 // snap lines closer than this are hidden
+constexpr float kNumMinPx = 30;                  // ruler numbers at least this far apart
+constexpr float kDragPx = 6;                     // a touch that moves less is a tap
+constexpr double kDoubleTapMs = 300;
+constexpr float kZoomPx = 12;                    // ruler: px of vertical drag for one step of zoom
 const float kRateQ[8] = {0.125f, 1.0f / 6, 0.25f, 1.0f / 3, 0.5f, 1.0f, 2.0f, 4.0f};
 const int kSnapDiv[6] = {1, 2, 3, 4, 6, 8};
 const float kEntryLens[9] = {0.125f, 0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
@@ -84,6 +116,16 @@ struct Model
     Sequence seqs[kSeqs];
     bool mask[kMaxMask];
     Model() { for (bool& m : mask) m = true; }
+};
+
+// One touch surface: the two ResetOnGestureEnd values. Both 0 = no finger. On lift the MPC
+// resets x first, then y: one value at 0 = the lift has begun (ignored).
+struct Touch
+{
+    bool down = false, dragged = false;
+    float x = 0, y = 0;      // last position (0..1)
+    float x0 = 0, y0 = 0;    // press position
+    double t0 = 0;
 };
 
 std::atomic<int> g_instances{0};
@@ -105,10 +147,10 @@ public:
             if (scales_[i].name == "12-edo") defScale = (int)i;
         }
         if (scaleNames.empty()) scaleNames.push_back("12-EDO");
+        auto num = [](const char* a, int i) { return std::string(a) + std::to_string(i + 1); };
 
         // SETUP
         addParam(mpc::floatParam ("velocity",  "Velocity",   1, 200, 100, "%", 0));
-        addParam(mpc::intParam   ("sequence",  "Sequence",   1, kSeqs, 1));
         addParam(mpc::intParam   ("steps",     "Steps",      1, kMaxSteps, 16));
         addParam(mpc::intParam   ("rstart",    "Range Start", 1, kMaxSteps, 1));
         addParam(mpc::intParam   ("rend",      "Range End",  1, kMaxSteps, 16));
@@ -125,11 +167,16 @@ public:
         addParam(mpc::intParam   ("benddown",  "Bend Down",  1, 24, 24, "st"));
         addParam(mpc::choiceParam("curve",     "Curve",      {"Sym", "OPx-4"}, 0));
         addParam(mpc::choiceParam("ptnmode",   "PTN Count",  {"Loops", "Bars"}, 0));
-        // NOTE
-        addParam(mpc::intParam   ("note",      "Note",       1, kMaxNotes, 1));
-        addParam(mpc::floatParam ("start",     "Start",      0, kMaxSteps, 0, "st", 2));
-        addParam(mpc::floatParam ("length",    "Length",     0, kMaxSteps, 1, "st", 2));
-        addParam(mpc::intParam   ("degree",    "Degree",     -kCenter, kPitchN - 1 - kCenter, 0));
+        addParam(mpc::intParam   ("group",     "Group",      0, 64, 0));
+        addParam(mpc::intParam   ("zoom",      "Steps/Page", 1, kMaxSteps, 16));
+        addParam(mpc::intParam   ("padnote",   "Pad 1 Note", 0, 127, 37));
+        // NOTE: knobs with 64 values or fewer (the MPC gives a knob about 128 positions)
+        addParam(mpc::intParam   ("note",      "Note",       1, 64, 1));
+        addParam(mpc::intParam   ("degree",    "Degree",     0, 63, 0));   // spread over the degrees of the scale mask
+        addParam(mpc::intParam   ("period",    "Period",     -4, 4, 0));
+        addParam(mpc::intParam   ("move",      "Move",       0, 63, 0));   // snap steps
+        addParam(mpc::intParam   ("length",    "Length",     1, 64, 1));   // snap steps
+        addParam(mpc::intParam   ("nudge",     "Nudge",      -32, 31, 0)); // 1/96 step
         addParam(mpc::floatParam ("vel",       "VEL",        0, 100, 100, "%", 0));
         addParam(mpc::floatParam ("glide",     "GLIDE",      0, 1, 0, "st", 2));
         addParam(mpc::intParam   ("ratch",     "RATCH",      1, 8, 1));
@@ -139,9 +186,13 @@ public:
         addParam(mpc::choiceParam("entrylen",  "Entry Len",  {"1/8", "1/4", "1/2", "3/4", "1", "1.5", "2", "3", "4"}, 4));
         addParam(mpc::boolParam  ("stepentry", "Step Entry", false));
         addParam(mpc::boolParam  ("delete",    "Delete",     false));
+        // VIEW
+        addParam(mpc::intParam   ("viewlow",   "View Low",   -32, 31, 0));
+        addParam(mpc::intParam   ("viewstart", "View Start", 1, kMaxSteps, 1));
+        addParam(mpc::intParam   ("sequence",  "Sequence",   1, kSeqs, 1));
         // CHANCE
         std::vector<std::string> opNames, ptnNames{"always"};
-        for (int o = 0; o < kNumOps; ++o) opNames.push_back(opInfo(o).name);
+        for (int o = 0; o < kNumOps; ++o) opNames.push_back(opInfo(opOfChoice(o)).name);
         for (int k = 1; k < kNumPtns; ++k) { int a, b; ptnOf(k, a, b); ptnNames.push_back(std::to_string(a) + ":" + std::to_string(b)); }
         for (int l = 0; l < kLanes; ++l)
         {
@@ -154,43 +205,59 @@ public:
         // MASK
         for (int d = 0; d < 31; ++d)
             addParam(mpc::boolParam(("mask" + std::to_string(d)).c_str(), ("Deg " + std::to_string(d)).c_str(), true));
-        // VIEW
-        addParam(mpc::intParam   ("viewlow",   "View Low",   -kCenter, kPitchN - kRows - kCenter, 0));
-        addParam(mpc::intParam   ("page",      "Step Page",  1, 4, 1));
-        // DISPLAY
-        for (int r = 0; r < kRows; ++r)
-            addParam(mpc::intParam(("row" + std::to_string(r + 1)).c_str(), ("Row " + std::to_string(r + 1)).c_str(), 0, kPitchN - 1, 0));
-        addParam(mpc::floatParam ("playx",     "Play X",     0, 1, kParkX, "", 3));
-        addParam(mpc::floatParam ("cursorx",   "Cursor X",   0, 1, kParkX, "", 3));
-        addParam(mpc::floatParam ("liney",     "Line Y",     0, 1, 0.5f, "", 2));
-        for (int c = 0; c < kCols; ++c)
-            addParam(mpc::floatParam(("colx" + std::to_string(c + 1)).c_str(), ("Col X " + std::to_string(c + 1)).c_str(), 0, 1, (c + 0.5f) / kCols, "", 3));
-        const char* setIds[3] = {"note", "start", "sel"};
-        const char* setNames[3] = {"N ", "St ", "Sel "};
-        for (int k = 0; k < 3; ++k)
-            for (int c = 0; c < kCols; ++c)
-                addParam(mpc::floatParam((std::string("mk") + setIds[k] + std::to_string(c + 1)).c_str(),
-                                         (setNames[k] + std::to_string(c + 1)).c_str(), 0, 1, 0, "", 3));
-        addParam(mpc::floatParam ("endx",      "End X",      0, 1, kParkX, "", 3));
-        // 1.1: touch surface over the grid (an XYPad; y = 0 is the bottom row) and pads
-        addParam(mpc::floatParam ("touchx",    "Touch X",    0, 1, kTouchIdle, "", 3));
-        addParam(mpc::floatParam ("touchy",    "Touch Y",    0, 1, kTouchIdle, "", 3));
-        addParam(mpc::intParam   ("padnote",   "Pad 1 Note", 0, 127, 37));
+        // texts
         addParam(mpc::intParam   ("lastkey",   "Last Note",  0, 127, 0));
-        for (int i = 0; i < 17; ++i)
-            addParam(mpc::floatParam(("rowline" + std::to_string(i + 1)).c_str(), ("Row Line " + std::to_string(i + 1)).c_str(), 0, 1, 0, "", 3));
-        for (int i = 0; i < 3; ++i)
-            addParam(mpc::floatParam(("perline" + std::to_string(i + 1)).c_str(), ("Per Line " + std::to_string(i + 1)).c_str(), 0, 1, 0, "", 3));
+        addParam(mpc::floatParam ("degtext",   "Deg Text",   0, 1, 0, "", 3));
+        addParam(mpc::floatParam ("viewtext",  "View Text",  0, 1, 0, "", 3));
+        addParam(mpc::floatParam ("freelit",   "Free Lit",   0, 1, 1, "", 4));   // 1 = parked off the right edge
+        // touch surfaces
+        const char* tn[5] = {"roll", "ruler", "labels", "lane", "free"};
+        for (int t = 0; t < 5; ++t)
+        {
+            addParam(mpc::floatParam((std::string(tn[t]) + "tx").c_str(), (std::string("Touch ") + tn[t] + " X").c_str(), 0, 1, 0, "", 4));
+            addParam(mpc::floatParam((std::string(tn[t]) + "ty").c_str(), (std::string("Touch ") + tn[t] + " Y").c_str(), 0, 1, 0, "", 4));
+        }
+        // display markers
+        auto disp = [&](const std::string& id, const std::string& name, float def) { addParam(mpc::floatParam(id.c_str(), name.c_str(), 0, 1, def, "", 4)); };
+        disp("liney", "Line Y", 0.5f);
+        disp("playx", "Play X", 1); disp("cursorx", "Cursor X", 1); disp("endx", "End X", 1);
+        for (int i = 0; i < 17; ++i) disp(num("rowline", i), num("Row Line ", i), 1);
+        for (int i = 0; i < 3; ++i) disp(num("perline", i), num("Per Line ", i), 1);
         for (int d = 0; d < 31; ++d)
             for (int k = 0; k < 3; ++k)
-                addParam(mpc::floatParam(("lab" + std::to_string(d) + "_" + std::to_string(k + 1)).c_str(),
-                                         ("Lab " + std::to_string(d) + "." + std::to_string(k + 1)).c_str(), 0, 1, 0, "", 3));
+                disp("lab" + std::to_string(d) + "_" + std::to_string(k + 1), "Lab " + std::to_string(d) + "." + std::to_string(k + 1), 1);
+        for (int i = 0; i < kStepLines; ++i) disp(num("stepline", i), num("Step Line ", i), 1);
+        for (int i = 0; i < kSnapLines; ++i) disp(num("snapline", i), num("Snap Line ", i), 1);
+        for (int i = 0; i < kGrpLines; ++i) disp(num("grpline", i), num("Grp Line ", i), 1);
+        for (int i = 0; i < kNums; ++i) disp(num("numx", i), num("Num X ", i), 0);
+        for (int j = 0; j < kShown; ++j) disp(num("notey", j), num("Note Y ", j), 0);
+        for (int j = 0; j < kShown; ++j)
+            for (int k = 0; k < kPieces; ++k) disp("piece" + std::to_string(j + 1) + "_" + std::to_string(k), "Piece " + std::to_string(j + 1) + "." + std::to_string(k), 0);
+        for (int j = 0; j < kShown; ++j) disp(num("notchx", j), num("Notch X ", j), 0);
+        for (int j = 0; j < kShown; ++j)
+            for (int k = 0; k < kGaps; ++k) disp("gap" + std::to_string(j + 1) + "_" + std::to_string(k + 1), "Gap " + std::to_string(j + 1) + "." + std::to_string(k + 1), 0);
+        for (int j = 0; j < kShown; ++j) disp(num("glidex", j), num("Glide X ", j), 0);
+        for (int j = 0; j < kShown; ++j) disp(num("chancex", j), num("Chance X ", j), 0);
+        disp("sely", "Sel Y", 0);
+        for (int k = 0; k < kPieces; ++k) disp("selpiece" + std::to_string(k), "Sel Piece " + std::to_string(k), 0);
+        disp("selnotchx", "Sel Notch X", 0);
+        for (int j = 0; j < kShown; ++j) disp(num("velx", j), num("Vel X ", j), 0);
+        for (int j = 0; j < kShown; ++j) disp(num("vely", j), num("Vel Y ", j), 0);
+        disp("selvelx", "Sel Vel X", 0); disp("selvely", "Sel Vel Y", 0);
+        // 2.1: MIDI goes out scheduled at the exact time of its sample, plus this delay
+        addParam(mpc::intParam   ("mididelay", "MIDI Delay*", 0, 30, 12, "ms"));   // not used in 2.1.1 (hidden)
+        for (int l = 0; l < kLanes; ++l) disp(num("chancetext", l), num("Chance ", l), 0);
+        addParam(mpc::boolParam  ("clearnote", "Clear Note", false));   // clears the chance lanes of the selected note
+        addParam(mpc::boolParam  ("clearall",  "Clear All",  false));   // 1st touch arms, 2nd touch within 3 s clears all
+        for (int k = 0; k < kGaps; ++k) disp("selgap" + std::to_string(k + 1), "Sel Gap " + std::to_string(k + 1), 0);
+        disp("selglidex", "Sel Glide X", 0); disp("selchancex", "Sel Chance X", 0);
 
+        if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
         for (auto& f : notify_) f.store(false);
         for (int i = 0; i < kNumParams; ++i) { lastSeen_[i] = getNormalised(i); computed_[i] = -1; }
         for (int& k : keyCh_) k = -1;
 
-        loadScale(getInt(kScale), nullptr);   // before the first block
+        loadScale(choiceAt(kScale), nullptr);   // before the first block
         tuning_.sc = &scaleSlots_[scalePub_.load()];
         scaleInUse_ = scalePub_.load();
         applyRoot();
@@ -199,6 +266,7 @@ public:
         const int n = g_instances.fetch_add(1);
         if (n == 0) std::snprintf(clientName_, sizeof clientName_, "scalaSeq");
         else        std::snprintf(clientName_, sizeof clientName_, "scalaSeq %d", n + 1);
+        midiThread_ = std::thread([this] { midiLoop(); });
         worker_ = std::thread([this] { workerLoop(); });
     }
 
@@ -206,7 +274,9 @@ public:
     {
         quit_.store(true);
         wake_.post();
+        wakeMidi_.post();
         if (worker_.joinable()) worker_.join();
+        if (midiThread_.joinable()) midiThread_.join();
     }
 
     void prepare(double, int) override {}
@@ -214,32 +284,46 @@ public:
     // Audio thread, after resume or a state load.
     void reset() override
     {
+        bool loaded20 = false;   // a project state saved by 2.0 (its display values match this layout)
         if (stagingReady_.exchange(false))
         {
             *model_ = *staging_;
             for (int d = 0; d < kMaxMask; ++d) tuning_.mask[d] = model_->mask[d];
-            edSeq_ = engSeq_ = std::max(0, std::min(kSeqs - 1, getInt(kSequence) - 1));
-            sel_ = 0;
+            edSeq_ = engSeq_ = std::max(0, std::min(kSeqs - 1, stagingView_[0]));
+            sel_ = stagingView_[1]; viewStart_ = stagingView_[2]; viewLow_ = stagingView_[3];
             savedAll_ = true;
+            loaded20 = true;
         }
         allNotesOff();
         engine_.reset();
         engine_.restart();
-        // take the knob values as the host restored them
+        // take the knob values as the host restored them; the touch surfaces are at rest
         for (int i = 0; i < kNumParams; ++i) lastSeen_[i] = getNormalised(i);
-        edSeq_ = std::max(0, std::min(kSeqs - 1, getInt(kSequence) - 1));
+        for (Touch& t : touch_) t = Touch();
         if (edSeq_ != engSeq_) { engSeq_ = edSeq_; pendSwap_ = false; }
-        sel_ = std::max(0, std::min(ed().count - 1, getInt(kNote) - 1));
-        viewLow_ = getInt(kViewLow);
-        page_ = std::max(0, std::min(3, getInt(kPage) - 1));
+        sel_ = std::max(0, std::min(ed().count - 1, sel_));
+        viewLow_ = std::max(-kCenter, std::min(kPitchN - kRows - kCenter, viewLow_));
+        viewStart_ = std::max(0, std::min(ed().steps - 1, viewStart_));
         cursor_ = std::max(0.0f, std::min((float)ed().steps, get(kCursor)));
         applyRoot();
         rebuildAll();
         syncLaneOps();
-        // after a load the restored display values stay; remember what they stand for
-        primeOnly_ = true;
-        refreshView();
-        primeOnly_ = false;
+        echoNote();
+        // After a 2.0 state the restored display values stay (remember what they stand for). After
+        // anything else (a 1.x project restores some display parameters of an older layout, or no
+        // state at all) every display value is written again.
+        if (loaded20)
+        {
+            primeOnly_ = true;
+            refreshView();
+            primeOnly_ = false;
+            trustRestored_ = true;
+        }
+        else
+        {
+            for (int i = 0; i < kNumParams; ++i) computed_[i] = -1;
+            refreshView();
+        }
         viewDirty_ = false;
         wake_.post();
     }
@@ -247,11 +331,17 @@ public:
     void process(mpc::ProcessContext& ctx) override
     {
         bool sent = false;
+        {
+            const int64_t now = rt::monoNs();
+            sclock_.update(now, sampleCount_, ctx.sampleRate > 0 ? ctx.sampleRate : 44100.0);
+        }
+        curSample_ = sampleCount_;
         // scale loaded by the worker
         const int sp = scalePub_.load();
-        if (sp != scaleInUse_) { scaleInUse_ = sp; tuning_.sc = &scaleSlots_[sp]; rebuildAll(); viewDirty_ = true; }
+        if (sp != scaleInUse_) { scaleInUse_ = sp; tuning_.sc = &scaleSlots_[sp]; rebuildAll(); echoKnobs(); viewDirty_ = true; }
         pollEdits();
         if (previewCh_ >= 0 && msNow() >= previewOffMs_) { stopNote(previewCh_); previewCh_ = -1; sent = true; }
+        if (previewSent_) { previewSent_ = false; sent = true; }
 
         // MIDI in: step entry and preview
         for (int i = 0; i < ctx.numMidiEvents; ++i)
@@ -269,14 +359,24 @@ public:
         const double sr = ctx.sampleRate > 0 ? ctx.sampleRate : 44100.0;
         const double bpm = (tr.tempoValid && tr.bpm > 1) ? tr.bpm : 120.0;
         const double qps = bpm / 60.0 / sr;   // quarter notes per sample
-        if (playing && (!wasPlaying_ || std::fabs(tr.ppqPos - expectPpq_) > 0.05)) { engine_.restart(); }
+        // The MPC reports the song position rounded to small ticks (about +-0.0007 quarter from block
+        // to block). Following it directly makes the phase step back a little at block starts, and
+        // at a step boundary the engine then counts the same boundary twice. So the plugin runs its
+        // own steady clock and follows the MPC only slowly (forward only); a jump (start, loop,
+        // locate) restarts the engine at the new position.
+        const bool jump = !wasPlaying_ || std::fabs(tr.ppqPos - expectPpq_) > 0.05;
+        const double base = jump ? tr.ppqPos : expectPpq_ + std::max(0.0, 0.05 * (tr.ppqPos - expectPpq_));
+        if (playing && jump)
+        {
+            engine_.restart();
+        }
         if (!playing && wasPlaying_) { noteOffActive(); sent = true; }
         wasPlaying_ = playing;
-        engine_.dir = getInt(kDirection);
-        engine_.ptnBars = getInt(kPtnMode) == 1;
+        engine_.dir = choiceAt(kDirection);
+        engine_.ptnBars = choiceAt(kPtnMode) == 1;
         const double barQ = tr.timeSigDenominator > 0 ? 4.0 * tr.timeSigNumerator / tr.timeSigDenominator : 4.0;
         engine_.barCount = (int)std::floor(tr.ppqPos / barQ);
-        const double stepQ = kRateQ[std::max(0, std::min(7, getInt(kRate)))];
+        const double stepQ = kRateQ[std::max(0, std::min(7, choiceAt(kRate)))];
 
         if (playing)
         {
@@ -284,14 +384,16 @@ public:
             {
                 const Tables& T = tables_[tIdx_];
                 const double loopQ = stepQ * std::max(1, T.steps);
-                double ph = std::fmod(tr.ppqPos + i * qps, loopQ) / loopQ;
+                double ph = std::fmod(base + i * qps, loopQ) / loopQ;
                 if (ph < 0) ph += 1;
                 EngineOut o = engine_.tick(ph, true, T, sr);
                 if (engine_.wrappedNow && pendSwap_) swapNow();
+                curSample_ = sampleCount_ + (uint64_t)i;
                 if (toMidi(o)) sent = true;
                 playStep_ = o.step;
+                playPos_ = ph * std::max(1, T.steps);
             }
-            expectPpq_ = tr.ppqPos + ctx.numFrames * qps;
+            expectPpq_ = base + ctx.numFrames * qps;
         }
         else
         {
@@ -301,8 +403,8 @@ public:
         sampleCount_ += (uint64_t)std::max(0, ctx.numFrames);
         if (viewDirty_) { refreshView(); viewDirty_ = false; }
         {
-            const float px = (playStep_ - page_ * 16) / 16.0f;
-            setDisp(kPlayX, (playStep_ >= 0 && px >= 0 && px < 1) ? px * kGridFrac : kParkX);
+            const float f = (playStep_ - (float)viewStart_) / zoom();
+            setDisp(kPlayX, (playStep_ >= 0 && f >= 0 && f < 1) ? padPos(f * kGW, 2, kGW + kPARK) : 1.0f);
         }
         if (notifyPending_) sent = true;
         // copy for project saving: the edited sequence only (a full copy after a load)
@@ -314,7 +416,7 @@ public:
             savedMutex_.unlock();
             savedDirty_ = savedAll_ = false;
         }
-        if (sent) { wake_.post(); notifyPending_ = false; }
+        if (sent) { wakeMidi_.post(); notifyPending_ = false; }
     }
 
     void parameterChanged(int index, float) override
@@ -322,68 +424,104 @@ public:
         if (index == kScale) { scaleDirty_.store(true); wake_.post(); }
     }
 
+    // the text of a chance lane's Amount (as the Amount knob shows it)
+    static std::string amountText(int op, int v)
+    {
+        char b[32];
+        switch (opInfo(op).unit)
+        {
+            case U_NONE: return "-";
+            case U_GATE: std::snprintf(b, sizeof b, "%s st", gateName(v)); break;
+            case U_DEG: if (v == 0) return "period"; std::snprintf(b, sizeof b, "%d deg", v); break;
+            case U_X: std::snprintf(b, sizeof b, "x%d", v); break;
+            case U_REP: std::snprintf(b, sizeof b, "+%d", v); break;
+            case U_RND: std::snprintf(b, sizeof b, "+-%d", v); break;
+            case U_PCT: std::snprintf(b, sizeof b, "%d%%", v); break;
+            case U_TO: std::snprintf(b, sizeof b, "step %d", v); break;
+            default: std::snprintf(b, sizeof b, "%d", v); break;
+        }
+        return b;
+    }
+
     bool formatValue(int index, float plain, std::string& out) override
     {
         char b[32];
         const int v = (int)std::lround(plain);
-        auto degText = [&](int idx, bool marks) {
+        auto degTxt = [&](int rel) {
             const int n = std::max(1, dispSize_.load());
-            const int d = ((idx - kCenter) % n + n) % n;
-            const int p = (int)std::floor((double)(idx - kCenter) / n);
-            const bool in = d >= kMaxMask || dispMask_[d].load(std::memory_order_relaxed);
-            if (d == 0) std::snprintf(b, sizeof b, marks && !in ? "(0 %+d)" : "0 %+d", p);
-            else std::snprintf(b, sizeof b, marks && !in ? "(%d)" : "%d", d);
+            const int d = ((rel % n) + n) % n, p = (int)std::floor((double)rel / n);
+            std::snprintf(b, sizeof b, "%d (%+d)", d, p);
             return std::string(b);
         };
-        if (index >= kRow0 && index < kRow0 + kRows) { out = degText(v, true); return true; }
-        if (index == kDegree)
+        switch (index)
         {
-            const int n = std::max(1, dispSize_.load());
-            const int d = ((v % n) + n) % n, p = (int)std::floor((double)v / n);
-            std::snprintf(b, sizeof b, "%d (%+d)", d, p); out = b; return true;
-        }
-        if (index == kNote)
-        {
-            const int c = dispCount_.load();
-            if (c == 0) out = "none";
-            else { std::snprintf(b, sizeof b, "%d / %d", std::min(v, c), c); out = b; }
-            return true;
-        }
-        if (index == kRoot)
-        {
-            static const char* nm[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-            std::snprintf(b, sizeof b, "%s%d (%d)", nm[((v % 12) + 12) % 12], v / 12 - 1, v); out = b; return true;
+            case kNoteSel:
+                if (tSel_.load() == 0) out = "none";
+                else { std::snprintf(b, sizeof b, "%d/%d", tSel_.load(), dispCount_.load()); out = b; }
+                return true;
+            case kDeg:
+            {
+                if (tSel_.load() == 0) { out = "-"; return true; }
+                const int n = std::max(1, dispSize_.load());
+                int list[kPitchN], m = 0;
+                for (int d = 0; d < n && m < kPitchN; ++d)
+                    if (d >= kMaxMask || dispMask_[d].load(std::memory_order_relaxed)) list[m++] = d;
+                if (m == 0) list[m++] = 0;
+                std::snprintf(b, sizeof b, "%d", list[std::max(0, std::min(m - 1, v * m / 64))]);
+                out = b;
+                return true;
+            }
+            case kDegText: out = tSel_.load() == 0 ? std::string("-") : degTxt(tDeg_.load()); return true;
+            case kViewText: std::snprintf(b, sizeof b, "%d-%d", tView0_.load() + 1, tView0_.load() + tZoom_.load()); out = b; return true;
+            case kPeriod: case kNudge: std::snprintf(b, sizeof b, v == 0 ? "0" : "%+d", v); out = b; return true;
+            case kMove: case kLen:
+            {
+                const float q = 1.0f / kSnapDiv[std::max(0, std::min(5, choiceAt(kSnap)))];
+                std::snprintf(b, sizeof b, "%g", std::round(v * q * 1000) / 1000); out = b; return true;
+            }
+            case kViewLow: out = degTxt(v); return true;
+            case kZoom: std::snprintf(b, sizeof b, "%d st", v); out = b; return true;
+            case kChanceText0: case kChanceText0 + 1: case kChanceText0 + 2: case kChanceText0 + 3:
+            {
+                const int l = index - kChanceText0, op = tChOp_[l].load();
+                if (tSel_.load() == 0) out = "";
+                else if (op == 0) { std::snprintf(b, sizeof b, "%d -", l + 1); out = b; }
+                else
+                {
+                    std::snprintf(b, sizeof b, "%d %s %d%%", l + 1, opInfo(op).name, tChProb_[l].load());
+                    out = b;
+                    if (opInfo(op).unit != U_NONE) out += " " + amountText(op, tChAmt_[l].load());   // the Amount knob's text
+                }
+                return true;
+            }
+            case kGroup: if (v == 0) out = "off"; else { std::snprintf(b, sizeof b, "%d st", v); out = b; } return true;
+            case kRoot:
+            {
+                static const char* nm[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+                std::snprintf(b, sizeof b, "%s%d (%d)", nm[((v % 12) + 12) % 12], v / 12 - 1, v); out = b; return true;
+            }
+            default: break;
         }
         if (index >= kLane0 && index < kMask0 && (index - kLane0) % 4 == 3)
         {
-            const int op = laneOp_[(index - kLane0) / 4].load(std::memory_order_relaxed);
-            const OpInfo& o = opInfo(op);
-            switch (o.unit)
-            {
-                case U_NONE: out = "-"; break;
-                case U_GATE: std::snprintf(b, sizeof b, "%s st", gateName(v)); out = b; break;
-                case U_DEG: if (v == 0) out = "period"; else { std::snprintf(b, sizeof b, "%d deg", v); out = b; } break;
-                case U_X: std::snprintf(b, sizeof b, "x%d", v); out = b; break;
-                case U_REP: std::snprintf(b, sizeof b, "+%d", v); out = b; break;
-                case U_RND: std::snprintf(b, sizeof b, "+-%d", v); out = b; break;
-                case U_TO: std::snprintf(b, sizeof b, "step %d", v); out = b; break;
-                default: std::snprintf(b, sizeof b, "%d", v); out = b; break;
-            }
+            out = amountText(laneOp_[(index - kLane0) / 4].load(std::memory_order_relaxed), v);
             return true;
         }
         return false;
     }
 
-    // Project state: the 32 sequences, the scale mask and the scale file.
+    // Project state (format SSQ4, 2.0.0): the 32 sequences, the scale mask and the scale file.
+    // Projects saved by 1.x (SSQ1-SSQ3) are not loaded.
     void saveExtraState(std::vector<uint8_t>& out) override
     {
         auto put32 = [&](uint32_t x) { for (int i = 0; i < 4; ++i) out.push_back((uint8_t)(x >> (8 * i))); };
         auto putStr = [&](const std::string& s) { put32((uint32_t)s.size()); out.insert(out.end(), s.begin(), s.end()); };
-        out.insert(out.end(), {'S', 'S', 'Q', '1'});
+        out.insert(out.end(), {'S', 'S', 'Q', '4'});
         {
             std::lock_guard<std::mutex> l(scaleMutex_);
             putStr(scaleName_); putStr(scaleText_);
         }
+        put32((uint32_t)edSeq_); put32((uint32_t)sel_); put32((uint32_t)viewStart_); put32((uint32_t)viewLow_);
         std::lock_guard<std::mutex> l(savedMutex_);
         for (int d = 0; d < kMaxMask; ++d) out.push_back(saved_->mask[d] ? 1 : 0);
         for (int s = 0; s < kSeqs; ++s)
@@ -402,10 +540,18 @@ public:
         size_t pos = 0;
         auto get32 = [&](uint32_t& x) { if (pos + 4 > size) return false; x = 0; for (int i = 0; i < 4; ++i) x |= (uint32_t)data[pos + i] << (8 * i); pos += 4; return true; };
         auto getStr = [&](std::string& s) { uint32_t n; if (!get32(n) || pos + n > size) return false; s.assign((const char*)data + pos, n); pos += n; return true; };
-        if (size < 4 || std::memcmp(data, "SSQ1", 4) != 0) return;
+        if (size < 4 || std::memcmp(data, "SSQ4", 4) != 0)
+        {
+            // a project saved with 1.x: its notes are not loaded, and its parameter values (some ids
+            // are the same, with other meanings) are set back to the defaults
+            for (int i = 0; i < numParams(); ++i) setNormalised(i, param(i).toNormalised(param(i).def));
+            return;
+        }
         pos = 4;
         std::string name, text;
         if (!getStr(name) || !getStr(text)) return;
+        int view[4] = {0, 0, 0, 0};
+        for (int& x : view) { uint32_t u; if (!get32(u)) return; x = (int)u; }
         if (pos + kMaxMask > size) return;
         Model& m = *staging_;
         for (int d = 0; d < kMaxMask; ++d) m.mask[d] = data[pos++] != 0;
@@ -426,8 +572,9 @@ public:
         {
             std::lock_guard<std::mutex> l(scaleMutex_);
             embedName_ = name; embedText_ = text;
-            appliedScale_ = getInt(kScale);   // keep the embedded scale, not what the index points to now
+            appliedScale_ = choiceAt(kScale);   // keep the embedded scale, not what the index points to now
         }
+        for (int k = 0; k < 4; ++k) stagingView_[k] = view[k];
         embedPending_.store(true);
         stagingReady_.store(true);
         wake_.post();
@@ -440,7 +587,7 @@ private:
         info.name = "scalaSeq";
         info.vendor = "blackdingus";
         info.uniqueId = MPC_FOURCC('B', 'y', 'Z', 'q');
-        info.version = 1300;
+        info.version = 2400;
         info.isInstrument = true;
         info.numInputs = 0;
         info.numOutputs = 2;
@@ -451,8 +598,24 @@ private:
     // ===== audio thread: model and edits ==========================================================
     Sequence& ed() { return model_->seqs[edSeq_]; }
     Note* selNote() { Sequence& s = ed(); return (sel_ >= 0 && sel_ < s.count) ? &s.notes[sel_] : nullptr; }
-    float snapQ() const { return 1.0f / kSnapDiv[std::max(0, std::min(5, getInt(kSnap)))]; }
+    // A choice parameter as the MPC shows it. A Q-Link can leave a value between two choices
+    // (measured: Entry Len 0.6171875 = choice 4.94); the MPC shows the lower choice, while the
+    // framework's getInt rounds to the nearest. Reading it rounded down keeps sound and screen equal.
+    int choiceAt(int i) const
+    {
+        const int n = (int)param(i).choices.size();
+        if (n < 2) return 0;
+        return std::max(0, std::min(n - 1, (int)std::floor(getNormalised(i) * (float)(n - 1) + 1e-4f)));
+    }
+    float plainOf(int i, float norm) const
+    {
+        const int n = (int)param(i).choices.size();
+        if (n >= 2) return (float)std::max(0, std::min(n - 1, (int)std::floor(norm * (float)(n - 1) + 1e-4f)));
+        return param(i).toPlain(norm);
+    }
+    float snapQ() const { return 1.0f / kSnapDiv[std::max(0, std::min(5, choiceAt(kSnap)))]; }
     float snapTo(float x) const { const float q = snapQ(); return std::round(x / q) * q; }
+    float zoom() const { return (float)std::max(1, std::min(kMaxSteps, getInt(kZoom))); }
 
     void applyRoot() { tuning_.rootPitch = getInt(kRoot) + get(kRootTune) / 100.0; }
 
@@ -477,7 +640,7 @@ private:
         engine_.restart();
     }
 
-    // value changes of the editable parameters (the knobs), compared with what we wrote ourselves
+    // knob changes (compared with what we wrote ourselves) and the touch surfaces
     void pollEdits()
     {
         for (int i = kFirstEdit; i <= kLastEdit; ++i)
@@ -485,122 +648,77 @@ private:
             const float v = getNormalised(i);
             if (v == lastSeen_[i]) continue;
             lastSeen_[i] = v;
-            onEdit(i, param(i).toPlain(v));
+            onEdit(i, plainOf(i, v));
         }
-        // touch surface
-        bool moved = false;
-        for (int i : {kTouchX, kTouchY})
+        for (int i : {(int)kClearNote, (int)kClearAll})
         {
             const float v = getNormalised(i);
-            if (v != lastSeen_[i]) { lastSeen_[i] = v; moved = true; }
+            if (v == lastSeen_[i]) continue;
+            lastSeen_[i] = v;
+            onEdit(i, plainOf(i, v));
         }
-        lastSeen_[kPadNote] = getNormalised(kPadNote);
-        if (moved) onTouchMove();
-        touchTick();
-    }
-
-    // ===== audio thread: touch on the grid ========================================================
-    // Tap an empty cell: a new note (row degree, cell start, Entry Len); the cursor moves there.
-    // Tap a note: select it. Tap the selected note again (no drag): delete it.
-    // Drag sideways after the touch: the end of the touched note follows the finger.
-    // The XYPad gives no release event: no movement for kTouchReleaseMs = released.
-    double msNow() const { return sampleCount_ * 1000.0 / std::max(1.0, sampleRate()); }
-
-    void touchCell(int& col, int& row) const
-    {
-        const float x = getNormalised(kTouchX), y = getNormalised(kTouchY);
-        col = std::max(0, std::min(kCols - 1, (int)std::floor(x * kCols)));
-        row = rowAtY(y);
-    }
-
-    void onTouchMove()
-    {
-        lastTouchMs_ = msNow();
-        if (touchState_ == 0) { touchState_ = 1; touchBeginMs_ = lastTouchMs_; return; }   // settle first
-        if (touchState_ != 2) return;
-        int col, row;
-        touchCell(col, row);
-        if (col == touchCol_) return;
-        touchDragged_ = true;
-        Sequence& s = ed();
-        if (touchNote_ < 0 || touchNote_ >= s.count) return;
-        Note& n = s.notes[touchNote_];
-        const float q = snapQ();
-        const float end = std::ceil((page_ * 16 + (col + 1) * 0.25f) / q - kEps) * q;
-        const float len = std::max(q, std::min(end - n.st, s.maxLen(n.st, touchNote_)));
-        if (std::fabs(len - n.len) > kEps) { n.len = len; modelDirty_ = true; echo(kLength, len); }
-    }
-
-    void touchTick()
-    {
-        if (touchState_ == 1 && msNow() - touchBeginMs_ >= kTouchSettleMs) { touchState_ = 2; touchBegin(); }
-        if (touchState_ == 2 && msNow() - lastTouchMs_ >= kTouchReleaseMs) touchEnd();
-    }
-
-    void touchBegin()
-    {
-        int col, row;
-        touchCell(col, row);
-        touchCol_ = col;
-        touchDragged_ = false;
-        touchDelete_ = false;
-        Sequence& s = ed();
-        const float pos = page_ * 16 + col * 0.25f;
-        const int pitch = std::max(0, std::min(kPitchN - 1, kCenter + viewLow_ + row));
-        touchNote_ = -1;
-        for (int i = 0; i < s.count; ++i)
+        if (clearArmed_ && msNow() - clearArmMs_ > 3000) { clearArmed_ = false; echo(kClearAll, 0); }   // not confirmed: disarm
+        for (int i = kLane0; i < kMask0 + 31; ++i)
         {
-            const Note& n = s.notes[i];
-            if (n.pitch == pitch && pos + 0.25f > n.st + kEps && pos < n.st + n.len - kEps) { touchNote_ = i; break; }
+            const float v = getNormalised(i);
+            if (v == lastSeen_[i]) continue;
+            lastSeen_[i] = v;
+            onEdit(i, plainOf(i, v));
         }
-        if (touchNote_ >= 0)
-        {
-            if (touchNote_ == sel_) touchDelete_ = true;   // deleted at release if not dragged
-            sel_ = touchNote_;
-            echoNote();
-            return;
-        }
-        if (pos >= s.steps - kEps) return;
-        const float q = snapQ();
-        const float st = std::floor(pos / q + kEps) * q;
-        if (s.noteAt(st) >= 0) return;
-        const float elen = kEntryLens[std::max(0, std::min(8, getInt(kEntryLen)))];
-        const float len = std::min(elen, s.maxLen(st, -1));
-        if (len < kMinLen) return;
-        Note nt;
-        nt.st = st; nt.len = len; nt.pitch = (int16_t)pitch;
-        const int idx = s.insert(nt);
-        if (idx < 0) return;
-        sel_ = touchNote_ = idx;
-        cursor_ = st;
-        echo(kCursor, cursor_);
-        modelDirty_ = true;
-        echoNote();
-        // preview the new note briefly
-        previewCh_ = startNote((float)tuning_.midiOf(pitch), 0.8f);
-        previewOffMs_ = msNow() + 200;
+        pollTouch(0, kRollTX); pollTouch(1, kRulTX); pollTouch(2, kLabTX); pollTouch(3, kVelTX); pollTouch(4, kFreeTX);
     }
 
-    void touchEnd()
+    // the degrees of the period that are in the scale mask (the Degree knob is spread over them)
+    int maskedDegrees(int* out) const
+    {
+        int m = 0;
+        for (int d = 0; d < tuning_.size() && m < kPitchN; ++d)
+            if (d >= kMaxMask || tuning_.mask[d]) out[m++] = d;
+        if (m == 0) out[m++] = 0;
+        return m;
+    }
+    float degreeKnob(const Note& n) const
+    {
+        int list[kPitchN];
+        const int m = maskedDegrees(list), d = tuning_.degreeOf(n.pitch);
+        int k = 0;
+        while (k < m - 1 && list[k] < d) ++k;
+        return (float)std::min(63, (int)std::floor((k + 0.5f) / m * 64));   // the knob value (0-63) of degree k
+    }
+
+    // A value text that depends on other state: tell the host to redraw it.
+    void textNotify(int i) { notify_[i].store(true, std::memory_order_release); notifyPending_ = true; }
+
+    void updateTexts()
     {
         Sequence& s = ed();
-        if (touchDelete_ && !touchDragged_ && touchNote_ >= 0 && touchNote_ < s.count)
+        Note* n = selNote();
+        tSel_.store(n ? sel_ + 1 : 0);
+        for (int l = 0; l < kLanes; ++l)
         {
-            s.remove(touchNote_);
-            sel_ = std::min(sel_, s.count - 1);
-            modelDirty_ = true;
-            echoNote();
+            tChOp_[l].store(n ? n->ch[l].op : 0);
+            tChProb_[l].store(n ? (int)std::lround(n->ch[l].prob * 100) : 0);
+            // the amount the engine uses (0 = the op's default; clamped to the sequence), as opValue
+            int eff = 0;
+            if (n)
+            {
+                const Cell& c = n->ch[l];
+                const Unit u = opInfo(c.op).unit;
+                if (u == U_GATE || (u == U_DEG && c.amt == 0)) eff = c.amt;   // gate: an index; degrees 0 = "period"
+                else if (u != U_NONE) eff = (int)std::lround(opValue(c, s, tuning_, sel_));
+            }
+            tChAmt_[l].store(eff);
         }
-        touchState_ = 0;
-        touchNote_ = -1;
-        // move the (invisible) puck away, so the next tap on the same place is a change again
-        setRT(kTouchX, kTouchIdle);
-        setRT(kTouchY, kTouchIdle);
+        tDeg_.store(n ? n->pitch - kCenter : 0);
+        tView0_.store(viewStart_);
+        tZoom_.store((int)zoom());
+        dispCount_.store(s.count);
+        for (int j : {kNoteSel, kDeg, kDegText, kViewText}) textNotify(j);
+        for (int l = 0; l < kLanes; ++l) textNotify(kChanceText0 + l);
     }
 
     // Write a parameter value now (audio thread: an atomic store). The worker later tells the
-    // host to redraw it. Values never change behind the audio thread's back, so a project
-    // reload gives the same values.
+    // host to redraw it.
     void setRT(int i, float norm)
     {
         if (getNormalised(i) == norm) return;
@@ -610,11 +728,13 @@ private:
         notifyPending_ = true;
     }
     void echo(int i, float plain) { setRT(i, param(i).toNormalised(plain)); }
-    // Display parameters: written when the computed value changes (a fresh instance draws
-    // everything; values restored from a project stay until the display really changes).
+    // Display parameters: written when the computed value changes (values restored from a
+    // project stay until the display really changes).
     void setDisp(int i, float norm)
     {
-        if (computed_[i] == norm) return;
+        // also repairs values moved from outside, except right after a project load (the restored
+        // values stay until the first edit; the host simulator writes random display values)
+        if (computed_[i] == norm && (primeOnly_ || trustRestored_ || getNormalised(i) == norm)) return;
         computed_[i] = norm;
         if (primeOnly_ || getNormalised(i) == norm) return;
         setNormalised(i, norm);
@@ -630,28 +750,58 @@ private:
         dispCount_.store(ed().count);
     }
 
+    // the knobs show the selected note
     void echoNote()
     {
-        viewDirty_ = true;   // the selection highlight
+        viewDirty_ = true;
         Sequence& s = ed();
         dispCount_.store(s.count);
-        echo(kNote, (float)(std::max(0, sel_) + 1));
         Note* n = selNote();
         if (!n) { for (int l = 0; l < kLanes; ++l) laneOp_[l].store(0); return; }
-        echo(kStart, n->st); echo(kLength, n->len); echo(kDegree, (float)(n->pitch - kCenter));
         echo(kVel, n->v * 100); echo(kGlide, n->gl); echo(kRatch, n->r); echo(kFade, n->fd); echo(kDuty, n->d);
         for (int l = 0; l < kLanes; ++l)
         {
             const Cell& c = n->ch[l];
             laneOp_[l].store(c.op);
-            echo(kLane0 + l * 4, c.op); echo(kLane0 + l * 4 + 1, c.prob * 100);
+            echo(kLane0 + l * 4, choiceOfOp(c.op)); echo(kLane0 + l * 4 + 1, c.prob * 100);
             echo(kLane0 + l * 4 + 2, c.ptn); echo(kLane0 + l * 4 + 3, c.amt);
         }
-        // keep the selected note on screen
-        const int page = std::max(0, std::min(3, (int)std::floor(n->st / 16)));
-        if (page != page_) { page_ = page; echo(kPage, page + 1); }
+        echoKnobs();
+    }
+    void echoKnobs()
+    {
+        echo(kSequence, (float)(edSeq_ + 1));
+        echo(kViewLow, (float)std::max(-32, std::min(31, viewLow_)));
+        echo(kViewStart, (float)(viewStart_ + 1));
+        Note* n = selNote();
+        if (!n) return;
+        const float q = snapQ();
+        const float grid = std::round(n->st / q) * q;
+        echo(kNoteSel, (float)(sel_ + 1));
+        echo(kDeg, degreeKnob(*n));
+        echo(kPeriod, (float)tuning_.periodOf(n->pitch));
+        echo(kMove, (float)std::lround(grid / q));
+        echo(kLen, (float)std::max(1L, std::lround(n->len / q)));
+        echo(kNudge, (float)std::lround((n->st - grid) * 96.0f));
+    }
+
+    // keep the selected note on screen
+    void keepVisible()
+    {
+        Note* n = selNote();
+        if (!n) return;
+        const float z = zoom();
+        if (n->st < viewStart_ - kEps || n->st >= viewStart_ + z - kEps)
+        {
+            viewStart_ = std::max(0, std::min(ed().steps - 1, (int)std::floor(n->st) - (int)(z / 4)));
+            viewDirty_ = true;
+        }
         const int rel = n->pitch - kCenter;
-        if (rel < viewLow_ || rel >= viewLow_ + kRows) { viewLow_ = std::max(-kCenter, rel - kRows / 2); echo(kViewLow, viewLow_); }
+        if (rel < viewLow_ || rel >= viewLow_ + kRows)
+        {
+            viewLow_ = std::max(-kCenter, std::min(kPitchN - kRows - kCenter, rel - kRows / 2));
+            viewDirty_ = true;
+        }
     }
 
     void echoSequence()
@@ -662,11 +812,24 @@ private:
         for (int d = 0; d < 31; ++d) echo(kMask0 + d, tuning_.mask[d] ? 1.0f : 0.0f);
         sel_ = std::min(sel_, s.count - 1);
         if (sel_ < 0 && s.count > 0) sel_ = 0;
+        viewStart_ = std::min(viewStart_, s.steps - 1);
         echoNote();
+        keepVisible();
+    }
+
+    // move note i to start st (keeps the list sorted); returns its new index
+    int moveNote(int i, float st)
+    {
+        Sequence& s = ed();
+        Note moved = s.notes[i];
+        moved.st = st;
+        s.remove(i);
+        return s.insert(moved);
     }
 
     void onEdit(int i, float v)
     {
+        trustRestored_ = false;
         Sequence& s = ed();
         Note* n = selNote();
         const int iv = (int)std::lround(v);
@@ -687,6 +850,7 @@ private:
                 s.steps = std::max(1, std::min(kMaxSteps, iv));
                 s.fitToSteps();
                 cursor_ = std::min(cursor_, (float)s.steps - snapQ());
+                viewStart_ = std::min(viewStart_, s.steps - 1);
                 echo(kRangeStart, s.rStart + 1); echo(kRangeEnd, s.rEnd + 1);
                 modelDirty_ = true; echoNote();
                 break;
@@ -696,60 +860,100 @@ private:
                 echo(kRangeStart, s.rStart + 1); modelDirty_ = true; break;
             case kSwing: s.swing = std::max(50.0f, std::min(75.0f, v)); modelDirty_ = true; break;
             case kRoot: case kRootTune: applyRoot(); modelDirty_ = true; break;
-            case kNote:
-                sel_ = std::max(0, std::min(s.count - 1, iv - 1));
-                echoNote();
+            case kSnap: echoNote(); break;
+            case kGroup: case kStepEntry: case kPadNote: viewDirty_ = true; break;
+            case kZoom: keepVisible(); viewDirty_ = true; break;
+            case kNoteSel:
+                if (s.count > 0) { sel_ = std::max(0, std::min(s.count - 1, iv - 1)); echoNote(); keepVisible(); }
                 break;
-            case kStart:
+            case kDeg:
                 if (n)
                 {
-                    const float st = std::max(0.0f, snapTo(v));
-                    if (std::fabs(st - n->st) > kEps && s.fits(st, n->len, sel_))
+                    int list[kPitchN];
+                    const int m = maskedDegrees(list);
+                    const int d = list[std::max(0, std::min(m - 1, iv * m / 64))];
+                    const int p = std::max(0, std::min(kPitchN - 1, kCenter + tuning_.periodOf(n->pitch) * tuning_.size() + d));
+                    if (p != n->pitch && s.fitsPitch(n->st, n->len, p, sel_)) { n->pitch = (int16_t)p; modelDirty_ = true; keepVisible(); }
+                    else echoKnobs();
+                }
+                break;
+            case kPeriod:
+                if (n)
+                {
+                    const int p = std::max(0, std::min(kPitchN - 1, kCenter + iv * tuning_.size() + tuning_.degreeOf(n->pitch)));
+                    if (p != n->pitch && s.fitsPitch(n->st, n->len, p, sel_)) { n->pitch = (int16_t)p; modelDirty_ = true; keepVisible(); }
+                    else echoKnobs();
+                }
+                break;
+            case kMove:
+                if (n)
+                {
+                    const float q = snapQ();
+                    const float grid = std::round(n->st / q) * q, off = n->st - grid;
+                    const float st = std::max(0.0f, std::min((float)s.steps - n->len, iv * q + off));   // end stops at the sequence end
+                    if (std::fabs(st - n->st) > kEps && s.fitsPitch(st, n->len, n->pitch, sel_))
                     {
-                        Note moved = *n;
-                        moved.st = st;
-                        s.remove(sel_);
-                        sel_ = s.insert(moved);
+                        sel_ = moveNote(sel_, st);
                         modelDirty_ = true;
                     }
-                    viewDirty_ = true;
+                    echoNote();
+                    keepVisible();
                 }
                 break;
-            case kLength:
+            case kLen:
                 if (n)
                 {
-                    float len = std::max(snapQ(), snapTo(v));
-                    len = std::max(kMinLen, std::min(len, s.maxLen(n->st, sel_)));
+                    const float q = snapQ();
+                    const float len = std::max(kMinLen, std::min(iv * q, s.maxLenPitch(n->st, n->pitch, sel_)));
                     if (std::fabs(len - n->len) > kEps) { n->len = len; modelDirty_ = true; }
-                    if (std::fabs(len - v) > snapQ()) echo(kLength, len);
+                    echo(kLen, (float)std::max(1L, std::lround(n->len / q)));
                 }
                 break;
-            case kDegree:
+            case kNudge:
                 if (n)
                 {
-                    int p = std::max(0, std::min(kPitchN - 1, kCenter + iv));
-                    const int dirn = p >= n->pitch ? 1 : -1;
-                    for (int k = 0; k < tuning_.size() && !tuning_.inScale(p); ++k) p = std::max(0, std::min(kPitchN - 1, p + dirn));
-                    if (p != n->pitch) { n->pitch = (int16_t)p; modelDirty_ = true; }
-                    if (p - kCenter != iv) echo(kDegree, (float)(p - kCenter));
+                    const float q = snapQ();
+                    const int half = std::max(0, std::min(31, (int)std::lround(q * 48.0f) - 1));   // inside half a snap step
+                    const int nd = std::max(-half, std::min(half, iv));
+                    const float grid = std::round(n->st / q) * q;
+                    const float st = std::max(0.0f, grid + nd / 96.0f);
+                    if (std::fabs(st - n->st) > kEps && s.fitsPitch(st, n->len, n->pitch, sel_)) { sel_ = moveNote(sel_, st); modelDirty_ = true; }
+                    echo(kNudge, (float)std::lround((ed().notes[sel_].st - grid) * 96.0f));
                 }
                 break;
+            case kViewLow: viewLow_ = std::max(-kCenter, std::min(kPitchN - kRows - kCenter, iv)); viewDirty_ = true; break;
+            case kViewStart: viewStart_ = std::max(0, std::min(s.steps - 1, iv - 1)); viewDirty_ = true; break;
             case kVel: if (n) { n->v = v / 100; modelDirty_ = true; } break;
             case kGlide: if (n) { n->gl = v; modelDirty_ = true; } break;
             case kRatch: if (n) { n->r = (int8_t)iv; modelDirty_ = true; } break;
             case kFade: if (n) { n->fd = (int8_t)iv; modelDirty_ = true; } break;
             case kDuty: if (n) { n->d = v; modelDirty_ = true; } break;
             case kCursor: cursor_ = std::max(0.0f, std::min((float)s.steps - snapQ(), snapTo(v))); viewDirty_ = true; break;
-            case kDelete:
+            case kClearNote:
                 if (v >= 0.5f)
                 {
-                    if (n) { s.remove(sel_); sel_ = std::min(sel_, s.count - 1); modelDirty_ = true; }
-                    echo(kDelete, 0);
+                    if (n) { for (Cell& c : n->ch) c = Cell(); modelDirty_ = true; }
+                    echo(kClearNote, 0);
                     echoNote();
                 }
                 break;
-            case kViewLow: viewLow_ = iv; viewDirty_ = true; break;
-            case kPage: page_ = std::max(0, std::min(3, iv - 1)); viewDirty_ = true; break;
+            case kClearAll:
+                if (v >= 0.5f) { clearArmed_ = true; clearArmMs_ = msNow(); }   // armed: the switch stays lit
+                else if (clearArmed_)
+                {
+                    clearArmed_ = false;   // second touch within 3 s: clear every chance op of the sequence
+                    for (int k = 0; k < s.count; ++k) for (Cell& c : s.notes[k].ch) c = Cell();
+                    modelDirty_ = true;
+                    echoNote();
+                }
+                break;
+            case kDelete:
+                if (v >= 0.5f)
+                {
+                    deleteSelected();
+                    echo(kDelete, 0);
+                }
+                break;
             default:
                 if (i >= kLane0 && i < kMask0 && n)
                 {
@@ -757,9 +961,8 @@ private:
                     Cell& c = n->ch[l];
                     if (f == 0)
                     {
-                        c.op = (uint8_t)std::max(0, std::min(kNumOps - 1, iv));
+                        c.op = (uint8_t)opOfChoice(iv);
                         c.amt = (uint8_t)opInfo(c.op).def;
-                        if (c.op && c.prob <= 0) { c.prob = 1.0f; echo(kLane0 + l * 4 + 1, 100); }
                         laneOp_[l].store(c.op);
                         echo(kLane0 + l * 4 + 3, c.amt);
                     }
@@ -784,10 +987,268 @@ private:
                     if (on == 0) { tuning_.mask[d] = true; echo(i, 1); }
                     for (int k = 0; k < kMaxMask; ++k) model_->mask[k] = tuning_.mask[k];
                     rebuildAll();
+                    echoKnobs();
                     modelDirty_ = true;
                 }
                 break;
         }
+    }
+
+    void deleteSelected()
+    {
+        Sequence& s = ed();
+        if (sel_ < 0 || sel_ >= s.count) return;
+        s.remove(sel_);
+        sel_ = std::min(sel_, s.count - 1);
+        modelDirty_ = true;
+        echoNote();
+    }
+
+    // a short preview of the selected note (touch and knob edits)
+    void preview()
+    {
+        Note* n = selNote();
+        if (!n) return;
+        if (previewCh_ >= 0) stopNote(previewCh_);
+        previewCh_ = startNote((float)tuning_.midiOf(n->pitch), n->v);
+        previewOffMs_ = msNow() + 200;
+        previewSent_ = true;
+    }
+
+    // ===== audio thread: touch =====================================================================
+    double msNow() const { return sampleCount_ * 1000.0 / std::max(1.0, sampleRate()); }
+
+    void pollTouch(int t, int px)
+    {
+        const float x = getNormalised(px), y = getNormalised(px + 1);
+        if (x == lastSeen_[px] && y == lastSeen_[px + 1]) return;
+        lastSeen_[px] = x; lastSeen_[px + 1] = y;
+        Touch& tc = touch_[t];
+        const bool rest = (x == 0.0f && y == 0.0f), half = (x == 0.0f || y == 0.0f);
+        if (!tc.down)
+        {
+            if (rest || half) return;   // the second value of a press has not arrived yet
+            tc = Touch();
+            tc.down = true; tc.x = tc.x0 = x; tc.y = tc.y0 = y; tc.t0 = msNow();
+            onPress(t, tc);
+            return;
+        }
+        if (rest)
+        {
+            tc.down = false;
+            onRelease(t, tc);
+            return;
+        }
+        if (half) return;   // the lift has begun
+        tc.x = x; tc.y = y;
+        onDrag(t, tc);
+    }
+
+    // pad value -> pixels (the touch puck is 2 px: centre = 1 + v * (pad - 2))
+    static float padPx(float v, float pad) { return 1.0f + v * (pad - 2.0f); }
+    float rollX(const Touch& t, bool start = false) const { return padPx(start ? t.x0 : t.x, kGW); }
+    float rollYUp(const Touch& t, bool start = false) const { return padPx(start ? t.y0 : t.y, kGH); }   // from the bottom
+    float posOfPx(float px) const { return viewStart_ + px / kGW * zoom(); }
+    float pxOfPos(float pos) const { return (pos - viewStart_) / zoom() * kGW; }
+    bool freeHeld() const { return touch_[4].down; }
+    // touch edits snap to the finest lines on screen: the Snap lines, or whole steps when the Snap
+    // lines are hidden (closer than kMinLinePx)
+    float touchQ() const { const float q = snapQ(); return q * (kGW / zoom()) >= kMinLinePx ? q : 1.0f; }
+    float snapOrFree(float pos) const { const float q = touchQ(); return freeHeld() ? std::round(pos * 96.0f) / 96.0f : std::round(pos / q) * q; }
+    float minLen() const { return freeHeld() ? kMinLen : touchQ(); }
+    int rowPitch(float yUp) const { return std::max(0, std::min(kPitchN - 1, kCenter + viewLow_ + rowAtY(yUp / kGH))); }
+
+    void onPress(int t, Touch& tc)
+    {
+        trustRestored_ = false;
+        Sequence& s = ed();
+        if (t == 4) { setDisp(kFreeLit, xPark(0, kFreeW, true)); return; }
+        if (t == 1) { gView0_ = viewStart_; gZoom0_ = (int)zoom(); gAxis_ = 0; return; }
+        if (t == 2) { gLow0_ = viewLow_; return; }
+        if (t == 3)
+        {
+            // the velocity bar nearest to the finger (within 14 px)
+            const float fx = padPx(tc.x, kGW);
+            int best = -1;
+            float bd = 14;
+            for (int i = 0; i < s.count; ++i)
+            {
+                const float d = std::fabs(pxOfPos(s.notes[i].st) + kVelW * 0.5f - fx);
+                if (s.notes[i].st >= viewStart_ - kEps && s.notes[i].st < viewStart_ + zoom() - kEps && d < bd) { bd = d; best = i; }
+            }
+            gVelNote_ = best;
+            if (best >= 0) { sel_ = best; setVelFromTouch(tc); echoNote(); }
+            return;
+        }
+        // the roll
+        const float fx = rollX(tc), pos = posOfPx(fx);
+        const int pitch = rowPitch(rollYUp(tc));
+        int hit = -1;
+        for (int i = s.count - 1; i >= 0; --i)   // the later note is drawn on top
+        {
+            const Note& n = s.notes[i];
+            if (n.pitch != pitch) continue;
+            const float a = pxOfPos(n.st), b = pxOfPos(n.st + n.len);
+            if (fx >= a - 4 && fx < std::max(b, a + 12)) { hit = i; break; }
+        }
+        gDelete_ = false;
+        if (hit >= 0)
+        {
+            const Note& n = s.notes[hit];
+            const float a = pxOfPos(n.st), b = pxOfPos(n.st + n.len);
+            const float edge = std::max(12.0f, std::min(24.0f, (b - a) / 3));
+            gMode_ = (fx >= b - edge && b - a >= 12) ? 3 : 2;   // 3 length, 2 move
+            if (hit == lastTapNote_ && msNow() - lastTapMs_ <= kDoubleTapMs) gDelete_ = true;
+            sel_ = hit;
+            gOrig_ = n;
+            echoNote();
+            preview();
+            return;
+        }
+        // empty: a new note on the nearest snap line (or exactly, while FREE is held)
+        float st = std::max(0.0f, snapOrFree(pos));
+        st = std::max(st, s.minStartPitch(st + kEps, pitch, -1));   // not inside a same-pitch note
+        if (st >= s.steps - kEps || s.maxLenPitch(st, pitch, -1) < kMinLen) { gMode_ = 0; return; }
+        const float elen = kEntryLens[std::max(0, std::min(8, choiceAt(kEntryLen)))];
+        Note nt;
+        const float room = s.maxLenPitch(st, pitch, -1);
+        nt.st = st; nt.len = std::min(minLen(), room); nt.pitch = (int16_t)pitch;   // a tap gets Entry Len at release
+        gEntryLen_ = std::min(elen, room);
+        const int idx = s.insert(nt);
+        if (idx < 0) { gMode_ = 0; return; }
+        sel_ = idx;
+        gMode_ = 1;
+        gAnchor_ = st;
+        gOrig_ = nt;
+        modelDirty_ = true;
+        echoNote();
+        preview();
+    }
+
+    void onDrag(int t, Touch& tc)
+    {
+        Sequence& s = ed();
+        if (t == 4) return;
+        if (t == 1)
+        {
+            const float dx = (tc.x - tc.x0) * (kGW - 2), dyDown = -(tc.y - tc.y0) * (kRulerPadH - 2);
+            if (gAxis_ == 0)
+            {
+                if (std::fabs(dx) < kDragPx && std::fabs(dyDown) < kDragPx) return;
+                gAxis_ = std::fabs(dx) >= std::fabs(dyDown) ? 1 : 2;
+            }
+            if (gAxis_ == 1)
+            {
+                const float stepPx = kGW / gZoom0_;
+                const int vs = std::max(0, std::min(s.steps - 1, gView0_ - (int)std::lround(dx / stepPx)));
+                if (vs != viewStart_) { viewStart_ = vs; viewDirty_ = true; echo(kViewStart, (float)(vs + 1)); }
+            }
+            else
+            {
+                const int z = std::max(1, std::min(kMaxSteps, gZoom0_ + (int)std::lround(dyDown / kZoomPx)));
+                if (z != (int)zoom())
+                {
+                    const float fx0 = padPx(tc.x0, kGW);
+                    const float anchor = gView0_ + fx0 / kGW * gZoom0_;   // the step under the finger stays
+                    echo(kZoom, (float)z);
+                    viewStart_ = std::max(0, std::min(s.steps - 1, (int)std::lround(anchor - fx0 / kGW * z)));
+                    echo(kViewStart, (float)(viewStart_ + 1));
+                    viewDirty_ = true;
+                }
+            }
+            return;
+        }
+        if (t == 2)
+        {
+            const float dyDown = -(tc.y - tc.y0) * (kGH - 2);
+            const int vl = std::max(-kCenter, std::min(kPitchN - kRows - kCenter, gLow0_ + (int)std::lround(dyDown / (kGH / kRows))));
+            if (vl != viewLow_) { viewLow_ = vl; viewDirty_ = true; echo(kViewLow, (float)std::max(-32, std::min(31, vl))); }
+            return;
+        }
+        if (t == 3) { if (gVelNote_ >= 0) setVelFromTouch(tc); return; }
+        // the roll
+        if (gMode_ == 0 || sel_ < 0 || sel_ >= s.count) return;
+        if (!tc.dragged)
+        {
+            const float dx = (tc.x - tc.x0) * (kGW - 2), dy = (tc.y - tc.y0) * (kGH - 2);
+            if (std::fabs(dx) < kDragPx && std::fabs(dy) < kDragPx) return;
+            tc.dragged = true;
+            gDelete_ = false;
+        }
+        const float pos = posOfPx(rollX(tc));
+        Note& n = s.notes[sel_];
+        if (gMode_ == 1)   // drawing: the press point stays one end
+        {
+            const float cur = std::max(0.0f, std::min((float)s.steps, snapOrFree(pos)));
+            const float ml = minLen();
+            float st, len;
+            if (cur >= gAnchor_) { st = gAnchor_; len = std::max(ml, cur - gAnchor_); }
+            else
+            {
+                // leftwards: stop at the end of the same-pitch note before
+                st = std::max(cur, s.minStartPitch(gAnchor_, n.pitch, sel_));
+                len = std::max(std::min(ml, s.maxLenPitch(st, n.pitch, sel_)), gAnchor_ - st);
+            }
+            len = std::min(len, s.maxLenPitch(st, n.pitch, sel_));   // rightwards: stop at the next same-pitch note
+            if (std::fabs(st - n.st) > kEps) sel_ = moveNote(sel_, st);
+            Note& m = s.notes[sel_];
+            if (std::fabs(len - m.len) > kEps || std::fabs(st - n.st) > kEps) { m.len = len; modelDirty_ = true; echoNote(); }
+        }
+        else if (gMode_ == 2)   // move in time and pitch
+        {
+            const float d = (rollX(tc) - rollX(tc, true)) / kGW * zoom();
+            float st;
+            if (freeHeld()) st = std::round((gOrig_.st + d) * 96.0f) / 96.0f;
+            else
+            {
+                st = snapOrFree(gOrig_.st + d);   // the start lands on the nearest visible snap line
+            }
+            st = std::max(0.0f, std::min((float)s.steps - n.len, st));   // its end stops at the sequence end
+            const int dr = rowAtY(rollYUp(tc) / kGH) - rowAtY(rollYUp(tc, true) / kGH);
+            const int pitch = std::max(0, std::min(kPitchN - 1, gOrig_.pitch + dr));
+            if (!s.fitsPitch(st, std::min(n.len, s.steps - st), pitch, sel_)) return;   // stays where it last fitted
+            const bool pitchChanged = pitch != n.pitch;
+            if (std::fabs(st - n.st) > kEps) sel_ = moveNote(sel_, st);
+            Note& m = s.notes[sel_];
+            if (pitchChanged) m.pitch = (int16_t)pitch;
+            if (pitchChanged || std::fabs(st - n.st) > kEps) { modelDirty_ = true; echoNote(); }
+            if (pitchChanged) preview();
+        }
+        else if (gMode_ == 3)   // length from the right end
+        {
+            const float end = std::max(n.st + std::min(minLen(), s.maxLenPitch(n.st, n.pitch, sel_)),
+                                       std::min(n.st + s.maxLenPitch(n.st, n.pitch, sel_), snapOrFree(pos)));
+            const float len = end - n.st;
+            if (std::fabs(len - n.len) > kEps) { n.len = len; modelDirty_ = true; echoNote(); }
+        }
+    }
+
+    void onRelease(int t, Touch& tc)
+    {
+        if (t == 4) { setDisp(kFreeLit, 1.0f); return; }   // parked off the right edge of the screen
+        if (t != 0) return;
+        if (!tc.dragged && gMode_ == 1 && sel_ >= 0 && sel_ < ed().count)
+        {
+            ed().notes[sel_].len = gEntryLen_;   // a tap on an empty place: a note of Entry Len
+            modelDirty_ = true;
+            echoNote();
+        }
+        if (!tc.dragged && gMode_ >= 2)
+        {
+            if (gDelete_) { deleteSelected(); lastTapNote_ = -1; }
+            else { lastTapNote_ = sel_; lastTapMs_ = msNow(); }
+        }
+        else lastTapNote_ = -1;
+        gMode_ = 0;
+        gDelete_ = false;
+    }
+
+    void setVelFromTouch(const Touch& tc)
+    {
+        Sequence& s = ed();
+        if (gVelNote_ < 0 || gVelNote_ >= s.count) return;
+        const float v = std::max(0.01f, std::min(1.0f, padPx(tc.y, kVelH) / kVelH));
+        if (std::fabs(v - s.notes[gVelNote_].v) > 1e-4f) { s.notes[gVelNote_].v = v; modelDirty_ = true; echo(kVel, v * 100); }
     }
 
     // ===== audio thread: keys (step entry, preview) ================================================
@@ -801,29 +1262,35 @@ private:
 
     void onKey(int key, int vel)
     {
+        trustRestored_ = false;
         echo(kLastKey, (float)key);
         const int p = keyToPitch(key);
         if (p < 0) return;
-        // preview: play the tuned note while the key is held
         if (keyCh_[key] >= 0) offKey(key);
         keyCh_[key] = startNote((float)tuning_.midiOf(p), vel / 127.0f);
         if (!getBool(kStepEntry)) return;
         Sequence& s = ed();
-        const float elen = kEntryLens[std::max(0, std::min(8, getInt(kEntryLen)))];
-        const int at = s.noteAt(cursor_);
-        if (at >= 0 && std::fabs(s.notes[at].st - cursor_) < kEps)
+        const float elen = kEntryLens[std::max(0, std::min(8, choiceAt(kEntryLen)))];
+        int at = -1;
+        for (int i = 0; i < s.count; ++i) if (std::fabs(s.notes[i].st - cursor_) < kEps) at = i;
+        if (at >= 0)
         {
-            s.notes[at].pitch = (int16_t)p;
-            s.notes[at].len = std::max(kMinLen, std::min(elen, s.maxLen(cursor_, at)));
+            const float room = s.maxLenPitch(cursor_, p, at);
+            if (room >= kMinLen && s.minStartPitch(cursor_ + kEps, p, at) <= cursor_ + kEps)
+            {
+                s.notes[at].pitch = (int16_t)p;
+                s.notes[at].len = std::max(kMinLen, std::min(elen, room));
+            }
             sel_ = at;
         }
-        else if (at < 0)
+        else
         {
-            const float len = std::min(elen, s.maxLen(cursor_, -1));
-            if (len >= kMinLen)
+            // a new note; not inside a same-pitch note, and it stops at the next one
+            const float room = s.maxLenPitch(cursor_, p, -1);
+            if (room >= kMinLen && s.minStartPitch(cursor_ + kEps, p, -1) <= cursor_ + kEps)
             {
                 Note nt;
-                nt.st = cursor_; nt.len = len; nt.pitch = (int16_t)p; nt.v = vel / 127.0f;
+                nt.st = cursor_; nt.len = std::max(kMinLen, std::min(elen, room)); nt.pitch = (int16_t)p; nt.v = vel / 127.0f;
                 const int idx = s.insert(nt);
                 if (idx >= 0) sel_ = idx;
             }
@@ -833,6 +1300,7 @@ private:
         echo(kCursor, cursor_);
         modelDirty_ = true;
         echoNote();
+        keepVisible();
     }
 
     void offKey(int key)
@@ -863,15 +1331,18 @@ private:
     int bendFor(float cents) const
     {
         return scala::bendValue(cents, getInt(kBendUp), getInt(kBendDown),
-                                getInt(kCurve) == 1 ? scala::BendCurve::Opx4 : scala::BendCurve::Symmetric);
+                                choiceAt(kCurve) == 1 ? scala::BendCurve::Opx4 : scala::BendCurve::Symmetric);
     }
     bool inBendRange(float semis) const { return semis <= getInt(kBendUp) && semis >= -getInt(kBendDown); }
 
-    void sendBend(int c, int b)
+    // force: send even if the channel already has this bend (before every note-on: a synth that
+    // takes all channels has one bend for all of them; measured 2026-11-21: skipped bends left
+    // notes at another channel's pitch)
+    void sendBend(int c, int b, bool force = false)
     {
-        if (b == chans_[c].bend) return;
+        if (b == chans_[c].bend && !force) return;
         const int v = b + 8192;
-        ring_.push((uint8_t)(0xE0 | c), (uint8_t)(v & 0x7F), (uint8_t)(v >> 7));
+        ring_.push((uint8_t)(0xE0 | c), (uint8_t)(v & 0x7F), (uint8_t)(v >> 7), outTime());
         chans_[c].bend = b;
     }
 
@@ -879,10 +1350,10 @@ private:
     {
         const int c = pickChannel();
         const int n12 = std::max(0, std::min(127, (int)std::lround(pitch)));
-        sendBend(c, bendFor((pitch - n12) * 100.0f));
+        sendBend(c, bendFor((pitch - n12) * 100.0f), true);
         int v = (int)std::lround(vel01 * 127.0f * get(kVelocity) / 100.0f);
         v = v < 1 ? 1 : (v > 127 ? 127 : v);
-        ring_.push((uint8_t)(0x90 | c), (uint8_t)n12, (uint8_t)v);
+        ring_.push((uint8_t)(0x90 | c), (uint8_t)n12, (uint8_t)v, outTime());
         Chan& ch = chans_[c];
         ch.on = true; ch.note = n12; ch.ref = (float)n12; ch.started = ++clock_;
         return c;
@@ -891,10 +1362,13 @@ private:
     void stopNote(int c)
     {
         if (c < 0 || c > 15 || !chans_[c].on) return;
-        ring_.push((uint8_t)(0x80 | c), (uint8_t)chans_[c].note, 0);
+        ring_.push((uint8_t)(0x80 | c), (uint8_t)chans_[c].note, 0, outTime());
         chans_[c].on = false;
         chans_[c].released = ++clock_;
     }
+
+    // the delivery time of a message made now: the steady time of the current sample + MIDI Delay
+    int64_t outTime() const { return sclock_.timeOf(curSample_) + (int64_t)getInt(kMidiDelay) * 1000000LL; }
 
     // engine output -> MIDI; returns true if something was queued
     bool toMidi(const EngineOut& o)
@@ -940,8 +1414,8 @@ private:
         outHigh_ = false;
     }
 
-    // ===== row geometry: rows sized by cents =====================================================
-    // rowY_[r] = bottom of visible row r as a fraction of the grid height (0 = bottom); rowY_[16] = 1.
+    // ===== display geometry ========================================================================
+    // rowY_[r] = bottom of visible row r as a fraction of the roll height (0 = bottom); rowY_[16] = 1.
     double centsOf(int idx) const { return tuning_.periodOf(idx) * tuning_.period() + tuning_.cents(tuning_.degreeOf(idx)); }
     void computeRows()
     {
@@ -949,67 +1423,178 @@ private:
         const double c0 = centsOf(low), span = std::max(1e-6, centsOf(low + kRows) - c0);
         for (int r = 0; r <= kRows; ++r) rowY_[r] = (float)((centsOf(low + r) - c0) / span);
     }
-    static float markY(float frac) { return kMarkPark + frac * (1.0f - kMarkPark); }
     int rowAtY(float y) const
     {
         for (int r = 0; r < kRows; ++r) if (y < rowY_[r + 1]) return r;
         return kRows - 1;
     }
+    // The MPC keeps an XYPad picture inside its pad: value v puts the picture's centre at
+    // size / 2 + v * (pad - size). padPos turns a wanted centre (pixels from the pad's left or
+    // bottom edge) into that value.
+    static float padPos(float centre, float size, float pad)
+    {
+        return std::max(0.0f, std::min(1.0f, (centre - size * 0.5f) / (pad - size)));
+    }
+    // x-parked markers: the pad starts kOFF px left of the roll and is kOFF + kGW + w wide, so the
+    // picture's left edge is roll left + v * (kOFF + kGW) - kOFF. v = 0 puts it off the screen.
+    static float xPark(float left, float, bool show)
+    {
+        return show ? std::max(0.0f, std::min(1.0f, (left + kOFF) / (kOFF + kGW))) : 0.0f;
+    }
 
-    // ===== audio thread -> worker: the grid view ==================================================
-    // The grid, row labels and cursor as display parameters (audio thread; only changed values).
+    // marks of note n drawn from a to b (px): ratchet gaps, glide ramp, chance ring (x-park values).
+    // The ring shows for any chance operation that is set (also at 0 %).
+    void noteMarks(const Note& n, float a, float b, bool startShown, float* out) const
+    {
+        for (int k = 0; k < kGaps; ++k)
+        {
+            const bool show = k < n.r - 1;
+            const float gx = pxOfPos(n.st + n.len * (k + 1) / std::max(1, (int)n.r)) - kGapW * 0.5f;
+            out[k] = xPark(gx, kGapW, show && gx > a && gx < b - kGapW);
+        }
+        bool chance = false;
+        for (int l = 0; l < kLanes; ++l) chance = chance || n.ch[l].op != 0;
+        const bool glide = n.gl > 0;
+        out[kGaps] = xPark(a + 6, kBadgeW, glide && startShown && b - a >= 6 + kBadgeW);
+        const float cx = a + (glide ? 6 + kBadgeW + 2 : 6);
+        out[kGaps + 1] = xPark(cx, kBadgeW, chance && startShown && b - cx >= kBadgeW);
+    }
+
+    // ===== audio thread -> worker: the piano roll ==================================================
     void refreshView()
     {
         Sequence& s = ed();
         computeRows();
+        const float q = snapQ(), z = zoom(), v0 = (float)viewStart_, stepPx = kGW / z;
+        const float rowPad = kGH + kPARKT;   // row lines / labels: parked at the top (under the ruler)
+        auto rowCentre = [&](int r) { return (rowY_[r] + rowY_[r + 1]) * 0.5f * kGH; };   // from the bottom
+        // rows: lines, period lines, degree labels
         int copies[31] = {0};
-        float labY[31][3] = {};
+        float labY[31][3];
+        for (auto& a : labY) for (float& x : a) x = 1.0f;
         int periods = 0;
-        float perY[3] = {0, 0, 0};
+        float perY[3] = {1, 1, 1};
         for (int r = 0; r < kRows; ++r)
         {
-            const int idx = std::max(0, std::min(kPitchN - 1, kCenter + viewLow_ + r));   // row 0 = bottom
-            setDisp(kRow0 + r, param(kRow0 + r).toNormalised((float)idx));
+            const int idx = std::max(0, std::min(kPitchN - 1, kCenter + viewLow_ + r));
             const int d = tuning_.degreeOf(idx);
-            if (d < 31 && copies[d] < 3) labY[d][copies[d]++] = markY((rowY_[r] + rowY_[r + 1]) * 0.5f);
-            if (d == 0 && periods < 3) perY[periods++] = markY(rowY_[r]);
+            if (d < 31 && copies[d] < 3) labY[d][copies[d]++] = padPos(rowCentre(r), 17, rowPad);
+            if (d == 0 && periods < 3) perY[periods++] = padPos(rowY_[r] * kGH, 2, rowPad);
         }
-        for (int i = 0; i <= kRows; ++i) setDisp(kRowLine0 + i, markY(rowY_[i]));
+        for (int i = 0; i <= kRows; ++i) setDisp(kRowLine0 + i, padPos(rowY_[i] * kGH, 1, rowPad));
         for (int i = 0; i < 3; ++i) setDisp(kPerLine0 + i, perY[i]);
         for (int d = 0; d < 31; ++d)
             for (int k = 0; k < 3; ++k) setDisp(kLab0 + d * 3 + k, labY[d][k]);
-        // one note at most in each quarter-step column (monophonic)
-        for (int c = 0; c < kCols; ++c)
+
+        // vertical lines (pad = roll + the parking strip at the right)
+        const float wide = kGW + kPARK;
+        auto lineX = [&](float pos, float w) {
+            const float f = (pos - v0) / z;
+            return (f >= -kEps && f <= 1 + kEps) ? padPos(f * kGW, w, wide) : 1.0f;
+        };
         {
-            const float a = page_ * 16 + c * 0.25f, b = a + 0.25f;
-            float yA = 0, yB = 0, yS = 0;
-            for (int i = 0; i < s.count; ++i)
+            int k = 0;
+            for (int m = viewStart_; m <= v0 + z + kEps && k < kStepLines; ++m) setDisp(kStepLine0 + k++, lineX((float)m, 1));
+            for (; k < kStepLines; ++k) setDisp(kStepLine0 + k, 1.0f);
+            k = 0;
+            const int div = (int)std::lround(1.0f / q);
+            if (div > 1 && q * stepPx >= kMinLinePx)
+                for (int m = (int)std::ceil(v0 / q - kEps); m * q <= v0 + z + kEps && k < kSnapLines; ++m)
+                    if (m % div != 0) setDisp(kSnapLine0 + k++, lineX(m * q, 1));
+            for (; k < kSnapLines; ++k) setDisp(kSnapLine0 + k, 1.0f);
+            const int g = getInt(kGroup);
+            k = 0;
+            if (g > 0)
+                for (int m = (int)std::ceil(v0 / g - kEps); m * g <= v0 + z + kEps && k < kGrpLines; ++m)
+                    setDisp(kGrpLine0 + k++, lineX((float)(m * g), 2));
+            for (; k < kGrpLines; ++k) setDisp(kGrpLine0 + k, 1.0f);
+            // ruler numbers: every step if there is room, else at Group lines, else every 2nd, 4th ...
+            int every = 1;
+            if (stepPx < kNumMinPx)
             {
-                const Note& n = s.notes[i];
-                if (b <= n.st + kEps || a >= n.st + n.len - kEps) continue;
-                const int r = n.pitch - (kCenter + viewLow_);
-                if (r >= 0 && r < kRows)
-                {
-                    const float y = markY((rowY_[r] + rowY_[r + 1]) * 0.5f);
-                    yA = y;
-                    if (n.st >= a - kEps && n.st < b - kEps) yB = y;
-                    if (i == sel_) yS = y;
-                }
-                break;
+                if (g > 0 && g * stepPx >= kNumMinPx) every = g;
+                else { every = 2; while (every * stepPx < kNumMinPx && every < 64) every *= 2; }
             }
-            setDisp(kColX0 + c, (c + 0.5f) / kCols);
-            setDisp(kMarkA0 + c, yA);
-            setDisp(kMarkB0 + c, yB);
-            setDisp(kMarkS0 + c, yS);
+            for (int m = 0; m < kNums; ++m)
+            {
+                const bool show = m >= viewStart_ && m < v0 + z - kEps && m < s.steps && m % every == 0;
+                setDisp(kNumX0 + m, xPark(pxOfPos((float)m) + 3, kNumW, show));
+            }
         }
+        setDisp(kEndX, s.steps < v0 + z - kEps ? lineX((float)s.steps, 3) : 1.0f);
+        setDisp(kCursorX, getBool(kStepEntry) && cursor_ >= v0 - kEps && cursor_ < v0 + z - kEps
+                              ? padPos(pxOfPos(cursor_) + 6.5f, 13, wide) : 1.0f);
+
+        // notes: exact bodies from binary pieces, notch, ratchet gaps, glide and chance badges,
+        // velocity bars. The later note is drawn on top.
+        // whole pixels: the MPC places each piece on a whole pixel, and the pictures are 1 px wider
+        // than their step (each piece overlaps the next), so no gap opens between pieces
+        auto bodyPieces = [&](int base, float a, float b, bool show) {   // pieces k at base + k
+            const float ra = std::round(a);
+            int len = show ? std::max(1, (int)std::lround(b) - (int)ra) : 0;
+            float x = ra;
+            for (int k = kPieces - 1; k >= 0; --k)
+            {
+                const int w = 1 << k;
+                if (len >= w) { setDisp(base + k, xPark(x, (float)w, true)); x += w; len -= w; }
+                else setDisp(base + k, 0.0f);
+            }
+        };
+        int j = 0, selJ = -1;
+        for (int i = 0; i < s.count && j < kShown; ++i)
         {
-            const float ex = (s.steps - page_ * 16) / 16.0f;
-            setDisp(kEndX, (ex > 0 && ex < 1) ? ex * kGridFrac : kParkX);
+            const Note& n = s.notes[i];
+            const int r = n.pitch - (kCenter + viewLow_);
+            const float a = std::max(0.0f, pxOfPos(n.st)), b = std::min(kGW, pxOfPos(n.st + n.len));
+            if (r < 0 || r >= kRows || b <= 0 || a >= kGW) continue;
+            const bool startShown = n.st >= v0 - kEps;
+            setDisp(kNoteY0 + j, padPos(rowCentre(r), kNoteH, kGH));
+            bodyPieces(kPieceX0 + j * kPieces, a, b, true);
+            setDisp(kNotchX0 + j, xPark(a, kNotchW, startShown));
+            float marks[kGaps + 2];
+            noteMarks(n, a, b, startShown, marks);
+            for (int k = 0; k < kGaps; ++k) setDisp(kGapX0 + j * kGaps + k, marks[k]);
+            setDisp(kGlideX0 + j, marks[kGaps]);
+            setDisp(kChanceX0 + j, marks[kGaps + 1]);
+            setDisp(kVelX0 + j, xPark(a, kVelW, startShown));
+            setDisp(kVelY0 + j, n.v);
+            if (i == sel_) selJ = j;
+            ++j;
         }
-        const float cx = (cursor_ - page_ * 16) / 16.0f;
-        setDisp(kCursorX, (cx >= 0 && cx < 1) ? (cx + 0.5f / 64) * kGridFrac : kParkX);
+        for (; j < kShown; ++j)
+        {
+            bodyPieces(kPieceX0 + j * kPieces, 0, 0, false);
+            setDisp(kNotchX0 + j, 0.0f);
+            for (int k = 0; k < kGaps; ++k) setDisp(kGapX0 + j * kGaps + k, 0.0f);
+            setDisp(kGlideX0 + j, 0.0f); setDisp(kChanceX0 + j, 0.0f); setDisp(kVelX0 + j, 0.0f);
+        }
+        // the selected note again, in its own colour, on top
+        if (selJ >= 0)
+        {
+            const Note& n = s.notes[sel_];
+            const float a = std::max(0.0f, pxOfPos(n.st)), b = std::min(kGW, pxOfPos(n.st + n.len));
+            setDisp(kSelY, computed_[kNoteY0 + selJ]);
+            bodyPieces(kSelPieceX0, a, b, true);
+            setDisp(kSelNotchX, xPark(a, kNotchW, n.st >= v0 - kEps));
+            setDisp(kSelVelX, computed_[kVelX0 + selJ]);
+            setDisp(kSelVelY, n.v);
+            float marks[kGaps + 2];
+            noteMarks(n, a, b, n.st >= v0 - kEps, marks);
+            for (int k = 0; k < kGaps; ++k) setDisp(kSelGapX0 + k, marks[k]);
+            setDisp(kSelGlideX, marks[kGaps]);
+            setDisp(kSelChanceX, marks[kGaps + 1]);
+        }
+        else
+        {
+            bodyPieces(kSelPieceX0, 0, 0, false);
+            setDisp(kSelNotchX, 0.0f);
+            setDisp(kSelVelX, 0.0f);
+            for (int k = 0; k < kGaps; ++k) setDisp(kSelGapX0 + k, 0.0f);
+            setDisp(kSelGlideX, 0.0f);
+            setDisp(kSelChanceX, 0.0f);
+        }
         setDisp(kLineY, 0.5f);
-        dispCount_.store(s.count);
+        updateTexts();
     }
 
     // ===== worker thread ==========================================================================
@@ -1030,16 +1615,46 @@ private:
         scalePub_.store(slot);
     }
 
-    void workerLoop()
+    // MIDI thread: only sends the queued messages to ALSA. Real-time priority (if the system
+    // allows it), woken by the audio thread, so notes are not delayed by display work.
+    void midiLoop()
     {
+#if defined(__linux__)
+        sched_param sp{};
+        sp.sched_priority = 40;
+        pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);   // ignored if not permitted
+#endif
         alsa_.open(clientName_, "MIDI Out");
+        // 2.1.1: scheduled output (alsa_.startQueue) is off: measured on the MPC One G2 it was worse
+        // (20.9 ms spread, and a pitch bend could arrive after its note-on). Direct output, as 2.0.
         while (!quit_.load())
         {
-            wake_.waitMs(10);
+            wakeMidi_.waitMs(50);
             uint8_t m[3];
+            int64_t t;
             int n = 0;
-            while (ring_.pop(m)) { deliver(m); ++n; }
+            while (ring_.pop(m, t))
+            {
+                deliver(m, 0);
+                ++n;
+            }
             if (n) alsa_.flush();
+        }
+        uint8_t m[3];
+        int64_t t;
+        while (ring_.pop(m, t)) deliver(m, 0);
+        for (int c = 0; c < 16; ++c) { const uint8_t off[3] = {(uint8_t)(0xB0 | c), 123, 0}; deliver(off, 0); }
+        alsa_.flush();
+        alsa_.close();
+    }
+
+    // Display thread: loads scales and tells the host which values changed (every 16 ms at most,
+    // so drags follow the finger).
+    void workerLoop()
+    {
+        while (!quit_.load())
+        {
+            wake_.waitMs(16);
             if (embedPending_.exchange(false))
             {
                 std::string t;
@@ -1048,28 +1663,25 @@ private:
             }
             else if (scaleDirty_.exchange(false))
             {
-                const int si = getInt(kScale);
+                const int si = choiceAt(kScale);
                 bool skip;
                 { std::lock_guard<std::mutex> l(scaleMutex_); skip = (si == appliedScale_); appliedScale_ = -1; }
                 if (!skip) loadScale(si, nullptr);
             }
-            // tell the host which values changed (the audio thread wrote them)
             for (int i = 0; i < kNumParams; ++i)
                 if (notify_[i].exchange(false, std::memory_order_acquire)) notifyHostParameterChanged(i);
         }
-        uint8_t m[3];
-        while (ring_.pop(m)) deliver(m);
-        for (int c = 0; c < 16; ++c) { const uint8_t off[3] = {(uint8_t)(0xB0 | c), 123, 0}; deliver(off); }
-        alsa_.flush();
-        alsa_.close();
     }
 
-    void deliver(const uint8_t* m)
+
+    // relNs: how long after now the message is due (<= 0: at once)
+    void deliver(const uint8_t* m, int64_t relNs)
     {
-        alsa_.send(m);
+        alsa_.sendIn(m, relNs);
 #ifdef SCALASEQ_TEST
         std::lock_guard<std::mutex> l(testMutex_);
         testLog_.push_back({m[0], m[1], m[2]});
+        testRel_.push_back(relNs);
 #endif
     }
 
@@ -1091,15 +1703,22 @@ private:
 
     Tuning tuning_;
     Engine engine_;
-    int tIdx_ = 0, edSeq_ = 0, engSeq_ = 0, sel_ = 0, page_ = 0, viewLow_ = 0;
+    int tIdx_ = 0, edSeq_ = 0, engSeq_ = 0, sel_ = 0, viewStart_ = 0, viewLow_ = 0;
     bool pendSwap_ = false, wasPlaying_ = false;
     float cursor_ = 0;
-    double expectPpq_ = 0;
+    double expectPpq_ = 0, playPos_ = 0;
     int playStep_ = -1;
 
     float lastSeen_[kNumParams];
     float computed_[kNumParams];   // display parameters: the last value the plugin computed
     bool primeOnly_ = false;
+    bool trustRestored_ = false;   // after a 2.x load: no repair of restored display values until the first edit
+    int stagingView_[4] = {0, 0, 0, 0};
+    // value texts (written by the audio thread, read by formatValue)
+    std::atomic<int> tSel_{0}, tDeg_{0}, tView0_{0}, tZoom_{16};
+    std::atomic<int> tChOp_[kLanes] = {}, tChProb_[kLanes] = {}, tChAmt_[kLanes] = {};
+    bool clearArmed_ = false;
+    double clearArmMs_ = 0;
     float rowY_[kRows + 1] = {};
     std::atomic<bool> notify_[kNumParams];
     bool notifyPending_ = false;
@@ -1111,32 +1730,45 @@ private:
     bool outHigh_ = false;
     float lastPitch_ = 0;
     uint64_t sampleCount_ = 0, lastBendAt_ = 0;
-    // touch gesture
-    int touchState_ = 0;   // 0 idle, 1 settling, 2 down
-    int touchNote_ = -1, touchCol_ = 0;
-    bool touchDragged_ = false, touchDelete_ = false;
-    double touchBeginMs_ = 0, lastTouchMs_ = 0;
     int previewCh_ = -1;
     double previewOffMs_ = 0;
+    bool previewSent_ = false;
+
+    // touch gestures: 0 roll, 1 ruler, 2 labels, 3 velocity lane, 4 FREE
+    Touch touch_[5];
+    int gMode_ = 0;           // roll: 0 none, 1 draw, 2 move, 3 length
+    float gAnchor_ = 0, gEntryLen_ = 1;
+    Note gOrig_;
+    bool gDelete_ = false;
+    int lastTapNote_ = -1;
+    double lastTapMs_ = -1e9;
+    int gView0_ = 0, gZoom0_ = 16, gAxis_ = 0, gLow0_ = 0, gVelNote_ = -1;
 
     std::atomic<int> dispSize_{12}, dispCount_{0};
     std::atomic<bool> dispMask_[kMaxMask];
     std::atomic<int> laneOp_[kLanes] = {};
 
-    rt::MsgRing ring_;
+    rt::TimedRing ring_;
+    rt::SampleClock sclock_;
+    uint64_t curSample_ = 0;
     rt::Wakeup wake_;
     alsa::Output alsa_;
     char clientName_[48] = {};
     std::atomic<bool> quit_{false};
-    std::thread worker_;
+    std::thread worker_, midiThread_;
+    rt::Wakeup wakeMidi_;
 
 #ifdef SCALASEQ_TEST
 public:
     std::mutex testMutex_;
     std::vector<std::array<uint8_t, 3>> testLog_;
+    std::vector<int64_t> testRel_;
     Model& testModel() { return *model_; }
     int testSel() const { return sel_; }
     float testCursor() const { return cursor_; }
+    int testViewLow() const { return viewLow_; }
+    int testViewStart() const { return viewStart_; }
+    int testChoice(int i) const { return choiceAt(i); }
 #endif
 };
 

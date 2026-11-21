@@ -22,7 +22,7 @@
           "widget": "switch"
         },
         {
-          "param": "Start",
+          "param": "Degree",
           "widget": "knob"
         },
         {
@@ -38,8 +38,9 @@
           "widget": "switch"
         },
         {
-          "param": "Length",
-          "widget": "knob"
+          "param": "Period",
+          "widget": "knob",
+          "polarity": "bipolar"
         },
         {
           "param": "RATCH",
@@ -50,11 +51,13 @@
           "widget": "knob",
           "overlay": "menu"
         },
-        "empty",
         {
-          "param": "Degree",
-          "widget": "knob",
-          "polarity": "bipolar"
+          "param": "Length",
+          "widget": "knob"
+        },
+        {
+          "param": "Move",
+          "widget": "knob"
         },
         {
           "param": "FADE",
@@ -66,7 +69,11 @@
           "widget": "knob",
           "overlay": "menu"
         },
-        "empty"
+        {
+          "param": "Nudge",
+          "widget": "knob",
+          "polarity": "bipolar"
+        }
       ]
     },
     {
@@ -178,21 +185,36 @@
           "param": "PTN Count",
           "widget": "switch"
         },
-        "empty",
+        {
+          "param": "Pad 1 Note",
+          "widget": "knob"
+        },
         {
           "param": "Range Start",
           "widget": "knob"
         },
-        "empty",
-        "empty",
-        "empty",
+        {
+          "param": "Group",
+          "widget": "knob"
+        },
+        {
+          "param": "Steps/Page",
+          "widget": "knob"
+        },
+        {
+          "param": "Clear Note",
+          "widget": "switch"
+        },
         {
           "param": "Range End",
           "widget": "knob"
         },
         "empty",
         "empty",
-        "empty"
+        {
+          "param": "Clear All",
+          "widget": "switch"
+        }
       ]
     },
     {

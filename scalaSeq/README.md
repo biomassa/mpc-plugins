@@ -6,11 +6,19 @@ scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MP
 
 ## How it works
 
-- Each note has a start and a length in steps, a scale degree, and the lanes VEL, GLIDE, RATCH, FADE and DUTY. Notes do not overlap.
+- Each note has a start and a length in steps, a scale degree, and the lanes VEL, GLIDE, RATCH, FADE and DUTY. Notes of different pitches can overlap: a note that starts later cuts the earlier note. Notes of the same pitch do not overlap: an edit stops at the neighbour.
 - The sequencer follows the song position of the MPC. It plays when the MPC plays and stops when the MPC stops. Rate sets the note value of one step.
 - For each note, scalaSeq sends the nearest 12-TET note and a pitch bend through its own MIDI port. The MPC shows this port as "scalaSeq MIDI Out". Each new note uses the next output channel, so the release of a note does not get the bend of the next note.
 - GLIDE is a pitch-bend sweep from the pitch of the note before.
 - The MPC ignores MIDI that a plugin sends to the host. Thus scalaSeq opens its own ALSA sequencer port, as Scala Retuner does. This is not part of the official SDK host contract.
+
+## After an update
+
+Remove scalaSeq from its track and add it again. Otherwise the MPC can keep the Q-Link assignments of the old version (measured: the knobs then control other parameters).
+
+## Version 2.0.0
+
+2.0.0 does not load projects saved with 1.x: scalaSeq starts empty in such a project.
 
 ## Requirements
 
@@ -30,20 +38,47 @@ scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MP
 
 ## Make a sequence
 
-On the SEQ page:
+The SEQ page is a piano roll. From top to bottom: the header, the ruler (step numbers), the roll (16 rows of scale degrees, sized by cents), and the velocity lane. The Q-Link banks and the FREE button are at the right.
 
-- Tap an empty cell: a new note there. The row sets the degree, the cell sets the start, Entry Len (NOTE page) sets the length. The cursor moves there.
-- Tap a note: select it. Tap the selected note again: delete it.
-- Drag sideways after the touch: the end of the note follows your finger.
-- Q-Link 1 scrolls the rows. Q-Link 2 changes the step page (16 steps for each page).
+Touch on the roll:
+
+- Press on an empty place and drag: a new note. It starts on the nearest snap line; the drag sets its length, also to the left. It stops at a note of the same pitch.
+- All touch edits snap to the lines on screen: the snap lines, or whole steps when the snap lines are hidden (closer than 10 px). Hold FREE to edit without snap. A tap gives a note of Entry Len (NOTE page).
+- Press a note: select it (and hear it).
+  - Drag the body: move it in time (its start lands on a snap line; its end stops at the end of the sequence) and in pitch (rows).
+  - Drag the right third (12-24 px): change the length.
+- Tap a note twice within 300 ms: delete it.
+- Hold FREE with a second finger: drags do not snap (1/96 step).
+
+Other touch areas:
+
+- Ruler: drag sideways to scroll (by whole steps), drag up or down to zoom (Steps/Page: 1 step for each 12 px; up = fewer steps). The step under the finger stays in place.
+- Degree labels at the left: drag up or down to scroll the rows.
+- Velocity lane: drag a note's bar up or down to set its velocity.
+
+Marks on the notes: thin gaps where the ratchets (RATCH) fall, a ramp for a note with GLIDE, a ring for a note with a chance operation. The selected note is green. The chance lanes of the selected note show as text under the FREE button; Clear Note and Clear All (SETUP page) remove them.
+
+The Q-Links (the 4 banks show right of the roll):
+
+| Bank | Knob 1 | Knob 2 | Knob 3 | Knob 4 |
+|---|---|---|---|---|
+| NOTE | Note (select, 1-64) | Degree (in the period) | Period (-4 to +4) | Move (0-63 snap steps) |
+| SHAPE | Length (1-64 snap steps) | VEL | GLIDE | RATCH |
+| RATCH | FADE | DUTY | Entry Len | Snap |
+| VIEW | View Low (rows, -32 to +31) | View Start (step 1-64) | Sequence (1-32) | Nudge (1/96 step, -32 to +31) |
+
+- Note: past the last note, the knob stays on the last note.
+- Degree: the full knob turn covers the degrees of the scale mask in the period. Period moves the note by whole periods.
+
+Vertical lines: a dim line at each snap step (not shown when closer than 10 px), a brighter line at each whole step, and the brightest lines at Group (SETUP page, every N steps; 0 = off). Steps/Page (SETUP page, 1-64, default 16) sets how many steps the roll shows.
 
 With the pads:
 
 1. Set Step Entry to on (NOTE page).
 2. Pads 1-16 are the 16 visible rows: pad 1 is the bottom row. Each pad adds a note at the cursor, and the cursor moves on by Entry Len. The pads also play the note.
-3. If the pads do not match the rows, look at LAST PAD at the bottom of the SEQ page while you press pad 1, and set Pad 1 Note (Q-Link 3) to that value.
+3. If the pads do not match the rows, look at LAST PAD in the header of the SEQ page while you press pad 1, and set Pad 1 Note (SETUP page) to that value.
 
-On the NOTE page, select a note with Note and change it with Start, Length, Degree and the lanes. Delete removes the selected note.
+On the NOTE page, select a note with Note and change it with Degree, Period, Move, Length, Nudge and the lanes. Delete removes the selected note.
 
 Press Play on the MPC to play the sequence.
 
@@ -51,10 +86,10 @@ Press Play on the MPC to play the sequence.
 
 | Page | Contents |
 |---|---|
-| SEQ | The roll: 16 rows of scale degrees, 16 steps in quarter-step cells. The height of a row is its interval in cents; a brighter line starts each period. Notes are drawn as markers; a grey line is the end of the sequence. The number at the left is the degree (0 is white). Orange: notes. Green: the selected note. Blue: the cursor. Red line: the playhead. Touch places, selects, deletes and lengthens notes. Q-Links: 1 View Low (rows), 2 Step Page, 3 Pad 1 Note; Note, Start, Length, Degree, Cursor, Sequence. |
-| NOTE | The selected note: Note, Start, Length, Degree, VEL, GLIDE, RATCH, FADE, DUTY. Step entry: Cursor, Entry Len, Snap, Step Entry, Delete. |
-| CHANCE | 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. |
-| SETUP | Sequence (1-32), Steps (1-64), Range Start, Range End, Swing (50-75 %), Rate, Direction, PTN Count, Velocity. |
+| SEQ | The piano roll (see above). |
+| NOTE | The selected note: Note, Degree, Period, Move, Length, Nudge, VEL, GLIDE, RATCH, FADE, DUTY. Step entry: Cursor, Entry Len, Snap, Step Entry, Delete. |
+| CHANCE | 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. The lanes run in order 1-4; UNMUTE and UNSKIP undo an earlier lane's MUTE or SKIP (for example MUTE 100 % + UNMUTE 50 % on PTN 1:4). GLIDE (Amount = share of the note) and NO GLIDE switch the glide for one hit. DELAY delays a hit by 1/16 .. 1 step, DELAY % by 1-100 % of a step. |
+| SETUP | Sequence (1-32), Steps (1-64), Range Start, Range End, Swing (50-75 %), Rate, Direction, PTN Count, Velocity, Pad 1 Note, Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
 | OUTPUT | Scale, Root, Root Tune, Out Ch, Voices, Bend Up, Bend Down, Curve. |
 | MASK, MASK 2 | One switch for each scale degree (0-30): the degrees of the scale mask. |
 

@@ -32,9 +32,9 @@ constexpr float kEps = 1e-6f;
 constexpr float kMinLen = 0.05f;
 
 // ---- chance ops (index = op number, same as dingus.pgRoll.js) ------------------------------------
-enum Unit : uint8_t { U_NONE, U_ST, U_TO, U_PTS, U_GATE, U_X, U_DEG, U_REP, U_RND };
+enum Unit : uint8_t { U_NONE, U_ST, U_TO, U_PTS, U_GATE, U_X, U_DEG, U_REP, U_RND, U_PCT };
 struct OpInfo { const char* name; int lo, hi, def; Unit unit; };
-constexpr int kNumOps = 28;
+constexpr int kNumOps = 31;   // 2.4: GLIDE, NO GLIDE, DELAY % appended (not in the Max original)
 inline const OpInfo& opInfo(int op)
 {
     static const OpInfo ops[kNumOps] = {
@@ -48,8 +48,20 @@ inline const OpInfo& opInfo(int op)
         {"P?+", 1, 64, 0, U_DEG}, {"P?-", 1, 64, 0, U_DEG}, {"P?", 1, 64, 0, U_DEG},
         {"DELAY", 0, 7, 3, U_GATE}, {"REPEAT", 1, 8, 1, U_REP}, {"REVERSE", 0, 0, 0, U_NONE},
         {"HOLD", 0, 0, 0, U_NONE}, {"P PREV", 0, 0, 0, U_NONE}, {"P NEXT", 0, 0, 0, U_NONE},
-        {"VEL?", 1, 100, 20, U_RND}};
+        {"VEL?", 1, 100, 20, U_RND},
+        {"GLIDE", 10, 100, 50, U_PCT}, {"NO GLIDE", 0, 0, 0, U_NONE},
+        {"DELAY %", 1, 100, 25, U_PCT}};
     return ops[(op >= 0 && op < kNumOps) ? op : 0];
+}
+// Op knob order (2.4.0). The sequence stores the op id; the knob shows the ops in this order,
+// so DELAY % sits after DELAY and saved sequences keep their ops.
+constexpr int kOpOrder[kNumOps] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                                   21, 30, 22, 23, 24, 25, 26, 27, 28, 29};
+inline int opOfChoice(int c) { return kOpOrder[(c >= 0 && c < kNumOps) ? c : 0]; }
+inline int choiceOfOp(int op)
+{
+    for (int c = 0; c < kNumOps; ++c) if (kOpOrder[c] == op) return c;
+    return 0;
 }
 // gate amounts in steps (GATE-, GATE+, DELAY)
 inline float gateSteps(int i)
@@ -117,6 +129,31 @@ struct Sequence
         for (int i = 0; i < count; ++i)
             if (i != self && notes[i].st >= st - kEps) m = std::min(m, notes[i].st - st);
         return m;
+    }
+    // 2.0.1: notes of the same pitch must not overlap (other pitches may)
+    float maxLenPitch(float st, int pitch, int self) const   // room up to the next same-pitch note
+    {
+        float m = steps - st;
+        for (int i = 0; i < count; ++i)
+            if (i != self && notes[i].pitch == pitch && notes[i].st >= st - kEps) m = std::min(m, notes[i].st - st);
+        return std::max(0.0f, m);
+    }
+    float minStartPitch(float st, int pitch, int self) const   // end of the same-pitch note before st
+    {
+        float m = 0;
+        for (int i = 0; i < count; ++i)
+            if (i != self && notes[i].pitch == pitch && notes[i].st < st - kEps) m = std::max(m, notes[i].st + notes[i].len);
+        return m;
+    }
+    bool fitsPitch(float st, float len, int pitch, int self) const
+    {
+        if (st < -kEps || st + len > steps + kEps) return false;
+        for (int i = 0; i < count; ++i)
+        {
+            if (i == self || notes[i].pitch != pitch) continue;
+            if (st < notes[i].st + notes[i].len - kEps && notes[i].st < st + len - kEps) return false;
+        }
+        return true;
     }
     bool fits(float st, float len, int self) const
     {
