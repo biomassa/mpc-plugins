@@ -72,4 +72,10 @@
 
 - When you drag the roll (for example the row labels), the MPC redraws the screen. Measured on the MPC One G2: the MPC's screen thread used 30-56 % of a core, and its audio thread did up to twice its normal work. scalaSeq's own audio work stayed at 6 % of a block or less.
 - 2.4.1 sends display changes every 50 ms at most (was 16 ms). Measured: the MPC's screen thread stayed at 12-56 % of a core and its audio thread at 8-19 % during the drag, and the audio still crackled. So the update rate of scalaSeq is not the cause.
+- Measured with the trace build (`--define SCALASEQ_TRACE=1`, see src/trace.h and tests/trace_report.py):
+  - scalaSeq's own audio work stayed at 0.11 ms or less for each block, also during a drag.
+  - Each display change that scalaSeq reports to the MPC makes the MPC call the next audio blocks later. A test without a drag (the rows moved 20 times each second, about 1,000 reports each second) gave 18-20 late blocks each second (4.8 ms instead of 2.9 ms), and no audible crackle.
+  - A real drag gave late blocks of up to 6.3 ms and a crackle. Late blocks of about 4.8 ms were not audible.
+  - One row step sends about 147 display changes with 16 notes, because the notes change display slots when a note scrolls in or out of view.
+- Possible fixes, not done: keep each note in the same display slot (no visible change), redraw the notes only when the finger lifts, or send the roll updates less often during a drag.
 - Not known: if a drag on other controls (another plugin, the MPC's own screens) also makes the audio crackle.

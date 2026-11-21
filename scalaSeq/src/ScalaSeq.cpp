@@ -29,6 +29,9 @@
 //   UI thread:    project save / load (a copy made by the audio thread; applied in reset()).
 
 #include "mpc_plugin.h"
+#ifdef SCALASEQ_TRACE
+#include "trace.h"
+#endif
 #include "seq_engine.h"
 #include "../../common/alsa_out.h"
 #include "../../common/rt_util.h"
@@ -331,6 +334,24 @@ public:
     void process(mpc::ProcessContext& ctx) override
     {
         bool sent = false;
+#ifdef SCALASEQ_TRACE
+        // Notice test (trace build only): with nobody touching the screen, move the row view one
+        // row up and down every 50 ms, through the same path as a label drag. Schedule from the
+        // first block: 20 s quiet, 20 s moving, 20 s quiet, 20 s moving, then quiet. A trace
+        // record of kind 5 marks each phase (op = phase number).
+        {
+            const double t = sampleCount_ / (ctx.sampleRate > 0 ? ctx.sampleRate : 44100.0);
+            const int phase = t < 20 ? 0 : t < 40 ? 1 : t < 60 ? 2 : t < 80 ? 3 : 4;
+            if (phase != testPhase_) { testPhase_ = phase; ssqtrace::put(ssqtrace::K_MARK, phase, 0, ssqtrace::nowNs()); }
+            const long tick = (long)(t / 0.05);
+            if ((phase == 1 || phase == 3) && tick != testTick_)
+            {
+                testTick_ = tick;
+                const int vl = viewLow_ + ((tick & 1) ? 1 : -1);
+                viewLow_ = vl; viewDirty_ = true; echo(kViewLow, (float)std::max(-32, std::min(31, vl)));
+            }
+        }
+#endif
         {
             const int64_t now = rt::monoNs();
             sclock_.update(now, sampleCount_, ctx.sampleRate > 0 ? ctx.sampleRate : 44100.0);
@@ -1711,6 +1732,10 @@ private:
     Tuning tuning_;
     Engine engine_;
     int tIdx_ = 0, edSeq_ = 0, engSeq_ = 0, sel_ = 0, viewStart_ = 0, viewLow_ = 0;
+#ifdef SCALASEQ_TRACE
+    int testPhase_ = -1;
+    long testTick_ = -1;
+#endif
     bool pendSwap_ = false, wasPlaying_ = false;
     float cursor_ = 0;
     double expectPpq_ = 0, playPos_ = 0;
@@ -1779,4 +1804,8 @@ public:
 #endif
 };
 
+#ifdef SCALASEQ_TRACE
+SSQ_TRACE_ENTRY(ScalaSeq)
+#else
 MPC_PLUGIN_ENTRY(ScalaSeq)
+#endif

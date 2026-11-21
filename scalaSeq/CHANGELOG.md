@@ -7,6 +7,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
+
 ## [2.4.1] - 2026-11-21
 
 ### Changed
