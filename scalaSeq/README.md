@@ -10,6 +10,7 @@ scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MP
 - The sequencer follows the song position of the MPC. It plays when the MPC plays and stops when the MPC stops. Rate sets the note value of one step.
 - For each note, scalaSeq sends the nearest 12-TET note and a pitch bend through its own MIDI port. The MPC shows this port as "scalaSeq MIDI Out". Each new note uses the next output channel, so the release of a note does not get the bend of the next note.
 - GLIDE is a pitch-bend sweep from the pitch of the note before.
+- There are 32 sequences. MIDI notes 60-91 on the scalaSeq track select them (see "Arrange the sequences").
 - The MPC ignores MIDI that a plugin sends to the host. Thus scalaSeq opens its own ALSA sequencer port, as Scala Retuner does. This is not part of the official SDK host contract.
 
 ## After an update
@@ -27,7 +28,7 @@ Remove scalaSeq from its track and add it again. Otherwise the MPC can keep the 
 
 ## Setup on the MPC
 
-1. Put scalaSeq on a track. Set the MIDI Input Port of this track to your controller or the pads (for step entry and preview). Do not use "All Ports".
+1. Put scalaSeq on a track. Set the MIDI Input Port of this track to your controller or the pads (for step entry, preview and sequence notes). Do not use "All Ports".
 2. Make one target track for each output channel. Voices sets the number of channels (default 4). For example, make 4 keygroup tracks with the same sample.
 3. On each target track, set:
    - MIDI Input Port: scalaSeq MIDI Out.
@@ -77,10 +78,22 @@ With the pads:
 1. Set Step Entry to on (NOTE page).
 2. Pads 1-16 are the 16 visible rows: pad 1 is the bottom row. Each pad adds a note at the cursor, and the cursor moves on by Entry Len. The pads also play the note.
 3. If the pads do not match the rows, look at LAST PAD in the header of the SEQ page while you press pad 1, and set Pad 1 Note (SETUP page) to that value.
+4. Pad 1 Note cannot be 45-91, because the rows must not overlap the sequence notes (60-91). The knob jumps from 44 to 92. If pad 1 sends a note in this range, change the pad notes on the MPC.
 
 On the NOTE page, select a note with Note and change it with Degree, Period, Move, Length, Nudge and the lanes. Delete removes the selected note.
 
 Press Play on the MPC to play the sequence.
+
+## Arrange the sequences
+
+MIDI notes 60-91 on the scalaSeq track select the sequences: note 60 is sequence 1, note 61 is sequence 2, and note 91 is sequence 32. Record these notes in the MPC sequence of the scalaSeq track to arrange the sequences. The Root knob (OUTPUT page) calls note 60 "C4". Not known: the name the MPC shows for note 60.
+
+- While the MPC plays, the new sequence starts at its Range Start at the time of the note. It plays until the next sequence note. A note off does nothing.
+- While the MPC is stopped, the note selects the sequence. Play starts it.
+- The SEQ page and the Sequence knob show the selected sequence.
+- A sequence note does not sound and does not enter a note.
+- When the MPC jumps (Play, a loop back, a locate), the sequence plays from the step that the song position gives, until the next sequence note.
+- The Sequence knob also selects a sequence. While the MPC plays, the knob's sequence starts at the end of the current loop.
 
 ## Pages
 
@@ -89,7 +102,7 @@ Press Play on the MPC to play the sequence.
 | SEQ | The piano roll (see above). |
 | NOTE | The selected note: Note, Degree, Period, Move, Length, Nudge, VEL, GLIDE, RATCH, FADE, DUTY. Step entry: Cursor, Entry Len, Snap, Step Entry, Delete. |
 | CHANCE | 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. The lanes run in order 1-4; UNMUTE and UNSKIP undo an earlier lane's MUTE or SKIP (for example MUTE 100 % + UNMUTE 50 % on PTN 1:4). GLIDE (Amount = share of the note) and NO GLIDE switch the glide for one hit. DELAY delays a hit by 1/16 .. 1 step, DELAY % by 1-100 % of a step. |
-| SETUP | Sequence (1-32), Steps (1-64), Range Start, Range End, Swing (50-75 %), Rate, Direction, PTN Count, Velocity, Pad 1 Note, Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
+| SETUP | Sequence (1-32), Steps (1-64), Range Start, Range End, Swing (50-75 %), Rate, Direction, PTN Count, Velocity, Pad 1 Note (0-44 or 92-127), Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
 | OUTPUT | Scale, Root, Root Tune, Out Ch, Voices, Bend Up, Bend Down, Curve. |
 | MASK, MASK 2 | One switch for each scale degree (0-30): the degrees of the scale mask. |
 
@@ -140,7 +153,7 @@ sh plugins/scalaSeq/tests/run.sh
 
 The skin in `skins/` is hand-written. `skin/make_skin.py` makes it again: the SEQ page, and the other pages from `ui.json`. Run it after each change to `ui.json` or to the parameters.
 
-`tests/run.sh` tests the engine (timing, ratchets and FADE, reverse, play range, SKIP and MUTE, P+ in a scale mask, glide, swing) and the plugin (step entry with the pads, preview, note edits, chance lanes, playback to MIDI, delete, the grid display, touch: tap, drag and tap-to-delete, project state).
+`tests/run.sh` tests the engine (timing, ratchets and FADE, reverse, play range, SKIP and MUTE, P+ in a scale mask, glide, swing) and the plugin (step entry with the pads, sequence notes and the Pad 1 Note limit, preview, note edits, chance lanes, playback to MIDI, delete, the grid display, touch: tap, drag and tap-to-delete, project state).
 
 The shared code (Scala parser, bend values, ALSA port, real-time helpers) is in `../common/`.
 

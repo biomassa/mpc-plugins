@@ -95,6 +95,11 @@ enum ParamIndex
     kNumParams
 };
 constexpr int kFirstEdit = kSteps, kLastEdit = kSequence;
+// 2.5: MIDI notes 60-91 on this track select sequences 1-32 (fixed). The 16 pad rows (Pad 1 Note
+// .. +15) must not overlap them, so Pad 1 Note cannot be 45-91.
+constexpr int kSeqNote0 = 60;
+constexpr int kPadLowMax = kSeqNote0 - kRows, kPadHighMin = kSeqNote0 + kSeqs;   // 44 and 92
+inline bool padNoteOk(int v) { return v <= kPadLowMax || v >= kPadHighMin; }
 
 // ---- SEQ page geometry in pixels (must match skin/make_skin.py) -------------------------------
 constexpr float kGW = 880, kGH = 476;            // the roll
@@ -308,6 +313,11 @@ public:
         viewLow_ = std::max(-kCenter, std::min(kPitchN - kRows - kCenter, viewLow_));
         viewStart_ = std::max(0, std::min(ed().steps - 1, viewStart_));
         cursor_ = std::max(0.0f, std::min((float)ed().steps, get(kCursor)));
+        // 2.5: a Pad 1 Note from an older project that overlaps the sequence notes moves up
+        padNote_ = getInt(kPadNote);
+        if (!padNoteOk(padNote_)) { padNote_ = kPadHighMin; echo(kPadNote, (float)padNote_); }
+        seqEvN_ = 0;
+        anchorQ_ = 0;
         applyRoot();
         rebuildAll();
         syncLaneOps();
@@ -368,7 +378,15 @@ public:
         for (int i = 0; i < ctx.numMidiEvents; ++i)
         {
             const mpc::MidiEvent& e = ctx.midi[i];
-            if (e.isNoteOn()) { onKey(e.note(), e.velocity()); sent = true; }
+            if (e.isNoteOn() && isSeqNote(e.note()))
+            {
+                // 2.5: a sequence note. Stopped: select it now. Playing: switch at its sample.
+                echo(kLastKey, (float)e.note());
+                if (!(ctx.transport.valid && ctx.transport.playing && ctx.transport.ppqValid)) selectSequence(e.note() - kSeqNote0);
+                else if (seqEvN_ < kMaxSeqEv) { seqEv_[seqEvN_].at = std::max(0, std::min(ctx.numFrames - 1, e.sampleOffset)); seqEv_[seqEvN_].seq = e.note() - kSeqNote0; ++seqEvN_; }
+            }
+            else if (e.isNoteOff() && isSeqNote(e.note())) {}   // ignored
+            else if (e.isNoteOn()) { onKey(e.note(), e.velocity()); sent = true; }
             else if (e.isNoteOff()) { offKey(e.note()); sent = true; }
             else if (e.isAllNotesOff()) { for (int k = 0; k < 128; ++k) offKey(k); sent = true; }
         }
@@ -390,6 +408,7 @@ public:
         if (playing && jump)
         {
             engine_.restart();
+            anchorQ_ = 0;   // 2.5: a jump goes back to the song grid
         }
         if (!playing && wasPlaying_) { noteOffActive(); sent = true; }
         wasPlaying_ = playing;
@@ -401,16 +420,22 @@ public:
 
         if (playing)
         {
+            int ev = 0;
             for (int i = 0; i < ctx.numFrames; ++i)
             {
+                // 2.5: sequence notes switch at their sample and start the sequence there
+                while (ev < seqEvN_ && seqEv_[ev].at <= i) { startSequenceAt(seqEv_[ev].seq, base + i * qps, stepQ); ++ev; }
                 const Tables& T = tables_[tIdx_];
                 const double loopQ = stepQ * std::max(1, T.steps);
-                double ph = std::fmod(base + i * qps, loopQ) / loopQ;
+                double ph = std::fmod(base + i * qps - anchorQ_, loopQ) / loopQ;
                 if (ph < 0) ph += 1;
                 EngineOut o = engine_.tick(ph, true, T, sr);
                 if (engine_.wrappedNow && pendSwap_) swapNow();
                 curSample_ = sampleCount_ + (uint64_t)i;
                 if (toMidi(o)) sent = true;
+#ifdef SCALASEQ_TEST
+                if (o.step != playStep_) testSteps_.push_back({(int64_t)curSample_, o.step, engSeq_});
+#endif
                 playStep_ = o.step;
                 playPos_ = ph * std::max(1, T.steps);
             }
@@ -421,6 +446,7 @@ public:
             playStep_ = -1;
             if (pendSwap_) swapNow();
         }
+        seqEvN_ = 0;
         sampleCount_ += (uint64_t)std::max(0, ctx.numFrames);
         if (viewDirty_) { refreshView(); viewDirty_ = false; }
         {
@@ -608,7 +634,7 @@ private:
         info.name = "scalaSeq";
         info.vendor = "blackdingus";
         info.uniqueId = MPC_FOURCC('B', 'y', 'Z', 'q');
-        info.version = 2410;
+        info.version = 2500;
         info.isInstrument = true;
         info.numInputs = 0;
         info.numOutputs = 2;
@@ -651,6 +677,37 @@ private:
     {
         if (edSeq_ == engSeq_) buildTables(ed(), tuning_, tables_[tIdx_]);
         else buildTables(ed(), tuning_, tables_[1 - tIdx_]);
+    }
+    // the edited sequence (the Sequence knob); the playing one follows at the loop end (swapNow)
+    void setEdSeq(int q)
+    {
+        if (q == edSeq_) return;
+        edSeq_ = q;
+        sel_ = 0;
+        if (edSeq_ != engSeq_) { pendSwap_ = true; buildTables(ed(), tuning_, tables_[1 - tIdx_]); }
+        else pendSwap_ = false;
+        echoSequence();
+    }
+    static bool isSeqNote(int n) { return n >= kSeqNote0 && n < kSeqNote0 + kSeqs; }
+    // 2.5: a sequence note while stopped: the screen and the Sequence knob switch now
+    void selectSequence(int q)
+    {
+        setEdSeq(q);
+        echo(kSequence, (float)(edSeq_ + 1));
+    }
+    // 2.5: a sequence note while playing, at the song position ppq: switch now and start the
+    // sequence at its Range Start (the engine starts at the step the phase points to)
+    void startSequenceAt(int q, double ppq, double stepQ)
+    {
+        selectSequence(q);
+        if (pendSwap_) swapNow(); else engine_.restart();
+        const Tables& T = tables_[tIdx_];
+        const int n = std::max(1, std::min(kMaxSteps, T.steps));
+        const int lo = std::max(0, std::min(n - 1, T.rs));
+        // the unswung position where step lo begins (the engine swings pairs of steps)
+        const double msw = std::max(50.0f, std::min(75.0f, T.swing)) / 100.0;
+        const double pos0 = ((lo & 1) && lo < n) ? (lo - 1) + 2 * msw : (double)lo;
+        anchorQ_ = ppq - (pos0 + 1e-6) * stepQ;
     }
     void swapNow()
     {
@@ -856,17 +913,7 @@ private:
         const int iv = (int)std::lround(v);
         switch (i)
         {
-            case kSequence:
-            {
-                const int q = std::max(0, std::min(kSeqs - 1, iv - 1));
-                if (q == edSeq_) break;
-                edSeq_ = q;
-                sel_ = 0;
-                if (edSeq_ != engSeq_) { pendSwap_ = true; buildTables(ed(), tuning_, tables_[1 - tIdx_]); }
-                else pendSwap_ = false;
-                echoSequence();
-                break;
-            }
+            case kSequence: setEdSeq(std::max(0, std::min(kSeqs - 1, iv - 1))); break;
             case kSteps:
                 s.steps = std::max(1, std::min(kMaxSteps, iv));
                 s.fitToSteps();
@@ -882,7 +929,13 @@ private:
             case kSwing: s.swing = std::max(50.0f, std::min(75.0f, v)); modelDirty_ = true; break;
             case kRoot: case kRootTune: applyRoot(); modelDirty_ = true; break;
             case kSnap: echoNote(); break;
-            case kGroup: case kStepEntry: case kPadNote: viewDirty_ = true; break;
+            case kPadNote:
+                // 2.5: jump over 45-91 (the sequence notes) in the direction of the turn
+                if (!padNoteOk(iv)) { const int nv = iv > padNote_ ? kPadHighMin : kPadLowMax; echo(kPadNote, (float)nv); padNote_ = nv; }
+                else padNote_ = iv;
+                viewDirty_ = true;
+                break;
+            case kGroup: case kStepEntry: viewDirty_ = true; break;
             case kZoom: keepVisible(); viewDirty_ = true; break;
             case kNoteSel:
                 if (s.count > 0) { sel_ = std::max(0, std::min(s.count - 1, iv - 1)); echoNote(); keepVisible(); }
@@ -1737,6 +1790,13 @@ private:
     long testTick_ = -1;
 #endif
     bool pendSwap_ = false, wasPlaying_ = false;
+    // 2.5: sequence notes of the current block (playing), the song position where the playing
+    // sequence started (0 = the song grid), the accepted Pad 1 Note
+    static constexpr int kMaxSeqEv = 16;
+    struct SeqEv { int at = 0, seq = 0; };
+    SeqEv seqEv_[kMaxSeqEv];
+    int seqEvN_ = 0, padNote_ = 37;
+    double anchorQ_ = 0;
     float cursor_ = 0;
     double expectPpq_ = 0, playPos_ = 0;
     int playStep_ = -1;
@@ -1801,6 +1861,10 @@ public:
     int testViewLow() const { return viewLow_; }
     int testViewStart() const { return viewStart_; }
     int testChoice(int i) const { return choiceAt(i); }
+    struct TestStep { int64_t sample; int step, seq; };
+    std::vector<TestStep> testSteps_;   // 2.5: each step change while playing (audio thread, test build only)
+    int testEdSeq() const { return edSeq_; }
+    int testEngSeq() const { return engSeq_; }
 #endif
 };
 

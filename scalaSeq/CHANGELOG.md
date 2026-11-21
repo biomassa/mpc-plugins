@@ -11,6 +11,21 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
 
+## [2.5.0] - 2026-11-21
+
+### Added
+
+- Sequence notes: MIDI notes 60-91 on the scalaSeq track select sequences 1-32 (note 60 = sequence 1, note 91 = sequence 32). Thus a sequence on the MPC can arrange the 32 sequences.
+  - While the MPC plays, the new sequence starts at its Range Start at the sample of the note. It plays until the next sequence note. A note off does nothing.
+  - While the MPC is stopped, the note selects the sequence. Play starts it.
+  - The SEQ page and the Sequence knob show the selected sequence.
+  - A sequence note does not sound and does not enter a note.
+  - A jump of the MPC (Play, a loop back, a locate) goes back to the song grid: the sequence plays from the step that the song position gives, as before, until the next sequence note.
+
+### Changed
+
+- Pad 1 Note cannot be 45-91, so that the 16 pad rows do not overlap the sequence notes. The knob jumps from 44 to 92 and back. A project with a Pad 1 Note of 45-91 changes it to 92 when it loads.
+
 ## [2.4.1] - 2026-11-21
 
 ### Changed

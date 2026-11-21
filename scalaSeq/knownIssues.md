@@ -14,6 +14,13 @@
 - Row heights by cents: in a scale with very small steps, a row can be lower than a note marker (24 px). Then markers of neighbouring rows overlap.
 - 1.3.0 (rows by cents) is tested on the MPC One G2: rows, period lines, degree labels and touch work (2026-11-21).
 
+## Sequence notes (2.5.0)
+
+- Tested in the unit tests and the host simulator only. Not yet tested on the MPC.
+- Not known: the name that the MPC shows for note 60 (C3 or C4). scalaSeq's Root knob calls it C4.
+- scalaSeq switches at the exact sample of the note. Its MIDI goes out once for each audio block, as all its MIDI does (see Timing).
+- Pad 1 Note cannot be 45-91. Notes 60-91 on this track always select sequences: they do no step entry and no preview.
+
 ## Timing
 
 - Measured on the MPC One G2 (2026-11-21, test pattern of 10 notes on and between steps, 122 bpm):

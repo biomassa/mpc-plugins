@@ -52,13 +52,13 @@ int main()
     takeLog(p);
     CHECK(kNumParams < 2000, "parameter count %d", (int)kNumParams);
 
-    // ---- step entry: pads 1, 3, 5 (Pad 1 Note = 60, so keys 60, 62, 64 = rows 0, 2, 4)
-    p.set(kPadNote, 60);
+    // ---- step entry: pads 1, 3, 5 (Pad 1 Note = 92, so keys 92, 94, 96 = rows 0, 2, 4)
+    p.set(kPadNote, 92);
     p.set(kStepEntry, 1);
     block(p, {});
-    block(p, {mpc::MidiEvent::noteOn(0, 60, 100), mpc::MidiEvent::noteOff(0, 60)});
-    block(p, {mpc::MidiEvent::noteOn(0, 62, 100), mpc::MidiEvent::noteOff(0, 62)});
-    block(p, {mpc::MidiEvent::noteOn(0, 64, 100), mpc::MidiEvent::noteOff(0, 64)});
+    block(p, {mpc::MidiEvent::noteOn(0, 92, 100), mpc::MidiEvent::noteOff(0, 92)});
+    block(p, {mpc::MidiEvent::noteOn(0, 94, 100), mpc::MidiEvent::noteOff(0, 94)});
+    block(p, {mpc::MidiEvent::noteOn(0, 96, 100), mpc::MidiEvent::noteOff(0, 96)});
     Sequence& s = p.testModel().seqs[0];
     CHECK(s.count == 3, "3 notes entered: %d", s.count);
     if (s.count == 3)
@@ -466,6 +466,93 @@ int main()
         q.internalResume();
         block(q, {});
         CHECK(q.testModel().seqs[0].count == 0, "a 1.x state is not loaded");
+    }
+
+    // ---- 2.5: sequence notes 60-91 select sequences 1-32; Pad 1 Note skips 45-91
+    {
+        ScalaSeq q;
+        q.internalSetSampleRate(48000); q.internalSetBlockSize(64); q.internalResume();
+        block(q, {});
+        auto pad = [&](float v) { q.set(kPadNote, v); block(q, {}); return (int)std::lround(q.get(kPadNote)); };
+        CHECK(pad(50) == 92, "Pad 1 Note up into 45-91 jumps to 92");
+        CHECK(pad(80) == 44, "Pad 1 Note down into 45-91 jumps to 44");
+        CHECK(pad(30) == 30 && pad(100) == 100, "Pad 1 Note outside 45-91 is kept");
+        pad(37);
+        takeLog(q);
+        // stopped: the note selects the sequence (screen and knob); no sound, no step entry
+        q.set(kStepEntry, 1); block(q, {});
+        block(q, {mpc::MidiEvent::noteOn(0, 62, 100), mpc::MidiEvent::noteOff(0, 62)});
+        CHECK(q.testEdSeq() == 2 && q.testEngSeq() == 2 && (int)std::lround(q.get(kSequence)) == 3, "note 62 selects sequence 3 while stopped");
+        CHECK(q.testModel().seqs[2].count == 0 && q.testModel().seqs[0].count == 0, "a sequence note does not enter a note");
+        int on = 0; for (auto& m : takeLog(q)) if ((m[0] & 0xF0) == 0x90) ++on;
+        CHECK(on == 0, "a sequence note does not sound: %d", on);
+        block(q, {mpc::MidiEvent::noteOn(0, 91, 100)});
+        CHECK(q.testEdSeq() == 31, "note 91 selects sequence 32");
+        block(q, {mpc::MidiEvent::noteOn(0, 59, 100), mpc::MidiEvent::noteOff(0, 59), mpc::MidiEvent::noteOn(0, 92, 100), mpc::MidiEvent::noteOff(0, 92)});
+        CHECK(q.testEdSeq() == 31, "notes 59 and 92 do not select a sequence");
+        q.set(kStepEntry, 0); block(q, {});
+        // sequence 2: Range Start 3 (odd step, with swing 60 %); sequence 1: default
+        block(q, {mpc::MidiEvent::noteOn(0, 61, 100)});
+        q.set(kSwing, 60); q.set(kRangeStart, 4); block(q, {});
+        CHECK(q.testModel().seqs[1].rStart == 3, "range start of sequence 2: %d", q.testModel().seqs[1].rStart);
+        block(q, {mpc::MidiEvent::noteOn(0, 60, 100)});
+        // playing (120 bpm, 1/16 = 6000 samples): sequence 1 from the song grid; at ppq 1.3 (in a
+        // block, offset 17) note 61: sequence 2 starts at step 3 at that sample
+        const double spq = 120.0 / 60.0 / 48000.0;   // quarters per sample
+        double ppq = 0; int64_t smp0 = -1, noteSmp = -1;
+        q.testSteps_.clear();
+        for (int b = 0; b < 600; ++b)
+        {
+            std::vector<mpc::MidiEvent> ev;
+            const double next = ppq + 64 * spq;
+            if (ppq <= 1.3 && next > 1.3)
+            {
+                const int off = (int)std::ceil((1.3 - ppq) / spq);
+                ev.push_back(mpc::MidiEvent::noteOn(0, 61, 100, off));
+                noteSmp = off;   // relative; made absolute below
+            }
+            if (b == 0) smp0 = -2;
+            block(q, ev, ppq);
+            if (noteSmp >= 0 && noteSmp < 64 && ev.size()) noteSmp += (int64_t)b * 64 + 1000000000;   // mark
+            ppq = next;
+        }
+        noteSmp -= 1000000000;
+        (void)smp0;
+        // the first recorded step change belongs to the first played block
+        const int64_t base = q.testSteps_.empty() ? 0 : q.testSteps_[0].sample;
+        bool sawSeq1 = false, ok = false;
+        int64_t at = -1; int stepAt = -1;
+        for (auto& t : q.testSteps_)
+        {
+            if (t.seq == 0) sawSeq1 = true;
+            if (t.seq == 1 && at < 0) { at = t.sample - base; stepAt = t.step; }
+        }
+        ok = at == noteSmp && stepAt == 3;
+        CHECK(sawSeq1, "sequence 1 played before the note");
+        CHECK(ok, "sequence 2 starts at the note's sample (%lld, want %lld) at step 3 (%d)", (long long)at, (long long)noteSmp, stepAt);
+        // after the note the steps follow from the note time: step 4 after one swung step (60 %: 1.2 x 6000)
+        int64_t s4 = -1;
+        for (auto& t : q.testSteps_) if (t.seq == 1 && t.step == 4 && s4 < 0) s4 = t.sample - base;
+        CHECK(s4 >= 0 && std::llabs(s4 - (noteSmp + 4800)) <= 1, "step 4 comes 0.8 step later (odd step with swing 60 %%): %lld", (long long)(s4 - noteSmp));
+        // a jump (locate to ppq 8 = song step 32) goes back to the song grid: the sequence starts
+        // at Range Start (step 3) at once, and step 4 follows on the song grid (pair 0-1 with swing
+        // 60 %: 1.2 steps = 7200 samples)
+        q.testSteps_.clear();
+        ppq = 8.0;
+        for (int b = 0; b < 200; ++b) { block(q, {}, ppq); ppq += 64 * spq; }
+        CHECK(q.testSteps_.size() >= 2 && q.testSteps_[0].step == 3 && q.testSteps_[1].step == 4
+              && std::llabs(q.testSteps_[1].sample - q.testSteps_[0].sample - 7200) <= 1,
+              "after a locate: step 3, then step 4 on the song grid (%lld)",
+              q.testSteps_.size() >= 2 ? (long long)(q.testSteps_[1].sample - q.testSteps_[0].sample) : -1LL);
+    }
+    // ---- 2.5: an older project with Pad 1 Note in 45-91 moves it to 92
+    {
+        ScalaSeq q;
+        q.internalSetSampleRate(48000); q.internalSetBlockSize(64);
+        q.set(kPadNote, 60);
+        q.internalResume();
+        block(q, {});
+        CHECK((int)std::lround(q.get(kPadNote)) == 92, "old Pad 1 Note 60 moves to 92: %d", (int)std::lround(q.get(kPadNote)));
     }
 
     std::printf(g_fail ? "%d FAILED\n" : "plugin tests passed\n", g_fail);
