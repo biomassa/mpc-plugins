@@ -7,6 +7,13 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-11-21
+
+### Changed
+
+- The plugin tells the MPC about display changes every 50 ms at most (was 16 ms). The roll moves in steps of up to 50 ms during a drag.
+- Measured on the MPC One G2: this does not stop the crackle during a drag (see knownIssues.md).
+
 ## [2.4.0] - 2026-11-21
 
 ### Added

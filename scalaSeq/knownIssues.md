@@ -67,3 +67,9 @@
 - A GLIDE must stay inside the bend range of the target (Bend Up, Bend Down). If it goes outside, the note starts again at the new pitch.
 - The display and touch parameters (about 1,200) show in the parameter lists of the MPC. Do not change them.
 - Sustain on keygroup targets: see Scala Retuner's known issues (the MPC ignores pedal up on keygroup tracks). scalaSeq does not forward CC64.
+
+## The audio can crackle while you drag the roll
+
+- When you drag the roll (for example the row labels), the MPC redraws the screen. Measured on the MPC One G2: the MPC's screen thread used 30-56 % of a core, and its audio thread did up to twice its normal work. scalaSeq's own audio work stayed at 6 % of a block or less.
+- 2.4.1 sends display changes every 50 ms at most (was 16 ms). Measured: the MPC's screen thread stayed at 12-56 % of a core and its audio thread at 8-19 % during the drag, and the audio still crackled. So the update rate of scalaSeq is not the cause.
+- Not known: if a drag on other controls (another plugin, the MPC's own screens) also makes the audio crackle.

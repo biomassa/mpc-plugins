@@ -587,7 +587,7 @@ private:
         info.name = "scalaSeq";
         info.vendor = "blackdingus";
         info.uniqueId = MPC_FOURCC('B', 'y', 'Z', 'q');
-        info.version = 2400;
+        info.version = 2410;
         info.isInstrument = true;
         info.numInputs = 0;
         info.numOutputs = 2;
@@ -1648,13 +1648,17 @@ private:
         alsa_.close();
     }
 
-    // Display thread: loads scales and tells the host which values changed (every 16 ms at most,
-    // so drags follow the finger).
+    // Display thread: loads scales and tells the host which values changed, every kDisplayMs at
+    // most. 2.4.1: 50 ms (was 16 ms). Measured on the MPC One G2: while the roll is dragged, the MPC's
+    // screen thread used 30-56 % of a core and its audio thread twice its normal load, and the
+    // audio crackled. Fewer updates mean fewer redraws.
+    static constexpr int kDisplayMs = 50;
     void workerLoop()
     {
+        auto lastNotify = std::chrono::steady_clock::now();
         while (!quit_.load())
         {
-            wake_.waitMs(16);
+            wake_.waitMs(kDisplayMs);
             if (embedPending_.exchange(false))
             {
                 std::string t;
@@ -1668,6 +1672,9 @@ private:
                 { std::lock_guard<std::mutex> l(scaleMutex_); skip = (si == appliedScale_); appliedScale_ = -1; }
                 if (!skip) loadScale(si, nullptr);
             }
+            const auto now = std::chrono::steady_clock::now();
+            if (now - lastNotify < std::chrono::milliseconds(kDisplayMs)) continue;   // an early wake (scale load)
+            lastNotify = now;
             for (int i = 0; i < kNumParams; ++i)
                 if (notify_[i].exchange(false, std::memory_order_acquire)) notifyHostParameterChanged(i);
         }
