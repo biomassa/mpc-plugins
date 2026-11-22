@@ -4,7 +4,7 @@ Plugins for Akai MPC standalone hardware, made with the official [MPC Plugin SDK
 
 > This software was developed with the assistance of a LLM.
 >
-> **The plugins are in a VERY EARLY DEVELOPMENT STAGE.** Expect bugs, missing features and changes that break saved projects. Many functions are not yet tested on the MPC. A plugin bug can freeze the MPC: save your work often.
+> **The plugins are in a VERY EARLY DEVELOPMENT STAGE.** Expect bugs, missing features and changes that break saved projects. A plugin bug can freeze the MPC: save your work often.
 
 ## Plugins
 
