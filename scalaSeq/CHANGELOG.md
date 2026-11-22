@@ -11,6 +11,49 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 - A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
 
+## [2.8.0] - 2026-11-22
+
+### Added
+
+- SEND buttons on LOCK (next to each Lock CC) and LANE (header, for the shown lane): a touch starts that CC as a zigzag (0 and 127 in turn, every 250 ms) on First Ch; SEND stays lit; a second touch, or 15 s, stops it with 64. Touch SEND, go to MIDI Learn (Learn on, +, select the row): Learn takes the CC number without typing. Nothing is sent while the CC is off.
+- SETUP: COPY, PASTE and CLEAR for the edited sequence (the Sequence knob). COPY takes the sequence with all its data. PASTE puts the copy into the edited sequence; CLEAR sets it back to a new sequence. PASTE and CLEAR: the first touch arms the button (lit amber), a second touch within 3 s does it. The copy is shared by all scalaSeq instances (copy on one track, paste on another) and is lost when the MPC app restarts.
+- Ratio rates: each sequence has a Rate Mode, Musical or Ratio (RATE page, Ratio lit teal). In Ratio mode the step is Rate divided by Ratio + Fine. Ratio: 0.25 ... 4 (15 values). Fine: -0.10 to +0.10 (the value shows the sum).
+- Locks (LOCK page): each note has 4 lock values (off or 0-127). Each sequence has Lock CC 1-4 (default off). A lock is sent just before its note.
+- CC lanes (LANE page): 2 lanes per sequence, with CC Num (default off), Steps, Rate, Mode, Ratio, Fine, Direction and Rest; one value per step (default 64). A lane sends its CC only when the value changes; at stop it sends Rest. A lock on the same CC at the same time wins.
+- LANE page: lane pads VEL / CC 1 / CC 2. The lane follows the SEQ view (View Start, Steps/Page): each step is a thin bar; drag across to draw. The current step of the shown lane is a red line. VEL shows the note velocities (moved from the SEQ page).
+- Lock and lane CCs go out on First Ch only (one MIDI Learn assignment per CC). CC numbers skip 0-5, 7, 10, 11, 32, 64-68, 98-101, 120-127.
+
+### Changed
+
+- Pages: SEQ, NOTE, LOCK, CHANCE, RATE, LANE, SETUP, OUTPUT, MASK, MASK 2. Rate, Direction, Steps, Swing, Range Start and Range End moved from SETUP to RATE.
+- SEQ page: the roll is taller (540 px, was 476).
+- Project state format SSQ5 (SSQ4 still loads, with no locks and lanes).
+
+## [2.7.0] - 2026-11-22
+
+### Added
+
+- Step controls on the NOTE page for Note, Move and Length: the name, a < button, the value and a > button. A tap steps one value; the Q-Link still turns it. Each stops at the first and last value. Move skips places where the note does not fit and goes to the next free place in that direction. These were faders. Reproduced offline: the Note fader goes from 1 to 64, and with 3 notes scalaSeq wrote back 3, so the handle sprang back near the start; the Move fader sprang back at the sequence end.
+
+### Changed
+
+- Text on the pages other than SEQ is larger. Names 34 px and values 38 px (were 24 and 26) for faders, switches, list fields and step controls. On a fader the name and the value use the full width (name at the left, value at the right), so long names are not cut. Pop-up lists: title 34 px, choices 28 px (were 26 and 22); a list with a long choice (Op: SND HOLD) has wider buttons (170 px). List pads: 26 px in one row, 22 px in two rows (were 20 and 17).
+- MASK pads: the degree numbers are 44 px (were 30).
+
+## [2.6.0] - 2026-11-22
+
+### Changed
+
+- Controls: number parameters are faders (Period, FADE, Nudge and Root Tune fill from the centre). Short lists (Snap, Direction, PTN Count, Curve) are amber/grey pads, lit = current. Long lists (Op, PTN, Rate, Entry Len, Scale) are fields: a tap opens a list of buttons (current lit amber); a tap on a choice picks it and closes the list; X closes it. The MPC's own list overlay opened empty on the MPC One G2 (tested with percSeq).
+
+### Fixed
+
+- Choice knobs (for example Op on the CHANCE page) could show a name one choice away from the one scalaSeq used: a Q-Link writes values between two choices (measured with percSeq on the MPC One G2: steps of 1/128). scalaSeq now writes back the exact value of the choice it uses.
+
+### Changed (pages)
+
+- MASK and MASK 2 pages: pads laid out like the MPC pads (as the POOL page of percSeq) in place of switches. Degree 0 is at the bottom left of MASK; degrees 16-30 are on MASK 2. Each pad shows its degree number; a lit pad (amber frame) is in the scale mask. Q-Link n is the pad at the same place.
+
 ## [2.5.0] - 2026-11-21
 
 ### Added

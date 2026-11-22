@@ -95,6 +95,35 @@ MIDI notes 60-91 on the scalaSeq track select the sequences: note 60 is sequence
 - When the MPC jumps (Play, a loop back, a locate), the sequence plays from the step that the song position gives, until the next sequence note.
 - The Sequence knob also selects a sequence. While the MPC plays, the knob's sequence starts at the end of the current loop.
 
+## Controls on the pages
+
+- Number parameters are faders. Period, FADE, Nudge and Root Tune fill from the centre.
+- Note, Move and Length (NOTE page) are step controls: touch < or > to step one value (the Q-Link also turns them). They stop at the first and last value. Move skips places where the note does not fit.
+- Short lists (Snap, Direction, PTN Count, Curve) are pads: the lit (amber) pad is the current choice.
+- Long lists (Op, PTN, Rate, Entry Len, Scale) are fields that show the current choice. Touch the field: a list of buttons opens (the current choice lit amber). Touch a choice to pick it; the list closes. X closes the list without a change. The Q-Link of the field also steps through the choices.
+
+## The port settings on the MPC
+
+Preferences → MIDI / Sync → Input Ports, entry "scalaSeq MIDI Out" (it is listed while scalaSeq is loaded):
+
+- Global: OFF. With Global on, the port's MIDI goes to the current track (MPC guide p61). With the scalaSeq track selected, its notes come back into scalaSeq and go out again: a loop (seen 2026-11-22: the pads blinked fast and the sound broke up).
+- Control: ON for MIDI Learn and SEND. With Control off, nothing from the port reaches MIDI Learn (guide p61).
+- Track: ON, so tracks can select the port as their MIDI Input.
+
+The MPC stores these switches under the port's ALSA number, not its name. If another plugin with a MIDI port loads first, the port can show up as a new entry with the switches reset.
+
+## MIDI Learn with SEND
+
+The MPC changes pad and track parameters from a CC only through MIDI Learn (MPC guide p319). percSeq and scalaSeq reach the MPC as an external MIDI port, so they cannot set pad parameters directly. To map a CC without typing its number:
+
+1. Set the CC number in scalaSeq (Lock CC or lane CC Num). Keep the MPC stopped.
+2. Touch SEND next to that CC. It lights and sends the CC as a zigzag (0 and 127 in turn, every 250 ms).
+3. Within 15 s: Menu, MIDI Learn, tap Learn (on), tap +, select the new row. The MPC fills in Type, Ch and Data.
+4. Choose Source (the track or pad) and Target (the parameter).
+5. Go back to scalaSeq and touch SEND again to stop it (it sends 64 at the end), or wait 15 s.
+
+MIDI Learn turns off when you leave its page, and it ignores a single CC message (measured), so SEND keeps sending while you switch pages. Learn takes the first message that arrives: do not play the sequence while Learn is on.
+
 ## Pages
 
 | Page | Contents |
@@ -102,9 +131,12 @@ MIDI notes 60-91 on the scalaSeq track select the sequences: note 60 is sequence
 | SEQ | The piano roll (see above). |
 | NOTE | The selected note: Note, Degree, Period, Move, Length, Nudge, VEL, GLIDE, RATCH, FADE, DUTY. Step entry: Cursor, Entry Len, Snap, Step Entry, Delete. |
 | CHANCE | 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. The lanes run in order 1-4; UNMUTE and UNSKIP undo an earlier lane's MUTE or SKIP (for example MUTE 100 % + UNMUTE 50 % on PTN 1:4). GLIDE (Amount = share of the note) and NO GLIDE switch the glide for one hit. DELAY delays a hit by 1/16 .. 1 step, DELAY % by 1-100 % of a step. |
-| SETUP | Sequence (1-32), Steps (1-64), Range Start, Range End, Swing (50-75 %), Rate, Direction, PTN Count, Velocity, Pad 1 Note (0-44 or 92-127), Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
+| LOCK | 4 lock values of the selected note (off or 0-127) and Lock CC 1-4 of the sequence. A lock is sent just before its note, on First Ch. Note < >. |
+| RATE | Rate, Mode (Musical / Ratio), Ratio and Fine (Ratio mode: the step is Rate divided by Ratio + Fine), Swing, Direction, Steps, Range Start, Range End. Mode, Ratio and Fine are per sequence. |
+| LANE | Lane pads VEL / CC 1 / CC 2. The lane shows the SEQ view; each step is a thin bar; drag across to draw. Settings of CC 1 and CC 2 (per sequence): CC Num (off = silent), Steps, Rate, Mode, Ratio, Fine, Direction, Rest (sent at stop). CCs go out on First Ch. |
+| SETUP | Sequence (1-32), COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all scalaSeq instances), PTN Count, Velocity, Pad 1 Note (0-44 or 92-127), Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
 | OUTPUT | Scale, Root, Root Tune, Out Ch, Voices, Bend Up, Bend Down, Curve. |
-| MASK, MASK 2 | One switch for each scale degree (0-30): the degrees of the scale mask. |
+| MASK, MASK 2 | Pads laid out like the MPC pads, one for each scale degree: MASK has degrees 0-15 (degree 0 at the bottom left), MASK 2 has degrees 16-30. A lit pad (amber frame) is in the scale mask. Touch a pad to put it in or out. Q-Link n is the pad at the same place. |
 
 ### Lanes
 

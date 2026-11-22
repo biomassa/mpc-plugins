@@ -1,0 +1,17 @@
+{
+  "name": "percSeq",
+  "manufacturer": "blackdingus",
+  "version": "1.3.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "BxPq",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Synth",
+  "file32": "VST/percseq-arm32.so",
+  "file64": "VST/percseq-arm64.so",
+  "description": "16-row percussion sequencer for drum tracks and chopped samples (percussion version of scalaSeq): own playhead per row, chance ops with sound ops, flam, sample reverse and CC ops; plays MIDI through its own ALSA port.",
+  "author": "blackdingus",
+  "url": "",
+  "license": "MIT"
+}

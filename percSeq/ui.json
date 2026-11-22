@@ -1,0 +1,299 @@
+{
+  "kit": "mono",
+  "qlinkGroups": "columns",
+  "pages": [
+    {
+      "name": "HIT",
+      "controls": [
+        "empty",
+        {
+          "param": "VEL",
+          "widget": "fader"
+        },
+        {
+          "param": "Step Entry",
+          "widget": "switch"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "RATCH",
+          "widget": "fader"
+        },
+        {
+          "param": "Cursor",
+          "widget": "fader"
+        },
+        {
+          "param": "Delete",
+          "widget": "switch"
+        },
+        "empty",
+        {
+          "param": "FADE",
+          "widget": "fader",
+          "polarity": "bipolar"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Nudge",
+          "widget": "fader",
+          "polarity": "bipolar"
+        },
+        {
+          "param": "DUTY",
+          "widget": "fader"
+        },
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "LOCK",
+      "controls": [
+        {
+          "param": "Lock 1",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 1",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Lock 2",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 2",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Lock 3",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 3",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Lock 4",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 4",
+          "widget": "fader"
+        },
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "CHANCE",
+      "controls": [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Prob 1",
+          "widget": "fader"
+        },
+        {
+          "param": "Prob 2",
+          "widget": "fader"
+        },
+        {
+          "param": "Prob 3",
+          "widget": "fader"
+        },
+        {
+          "param": "Prob 4",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Amount 1",
+          "widget": "fader"
+        },
+        {
+          "param": "Amount 2",
+          "widget": "fader"
+        },
+        {
+          "param": "Amount 3",
+          "widget": "fader"
+        },
+        {
+          "param": "Amount 4",
+          "widget": "fader"
+        }
+      ]
+    },
+    {
+      "name": "ROW",
+      "controls": [
+        {
+          "param": "Sel Row",
+          "widget": "fader"
+        },
+        {
+          "param": "Rev CC",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "MIDI Note",
+          "widget": "fader"
+        },
+        {
+          "param": "CC Num",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Velocity",
+          "widget": "fader"
+        },
+        {
+          "param": "CC Rest",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "RATE",
+      "controls": [
+        "empty",
+        {
+          "param": "Fine",
+          "widget": "fader",
+          "polarity": "bipolar",
+          "visibleWhen": {
+            "param": "Rate Mode",
+            "choice": "Ratio"
+          }
+        },
+        {
+          "param": "Range Start",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Swing",
+          "widget": "fader"
+        },
+        {
+          "param": "Range End",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Steps",
+          "widget": "fader"
+        },
+        "empty",
+        "empty"
+      ]
+    },
+    {
+      "name": "LANE",
+      "controls": [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Lane CC",
+          "widget": "fader"
+        },
+        {
+          "param": "Lane Steps",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Lane Fine",
+          "widget": "fader",
+          "polarity": "bipolar"
+        },
+        "empty",
+        {
+          "param": "Rest",
+          "widget": "fader"
+        }
+      ]
+    },
+    {
+      "name": "SETUP",
+      "controls": [
+        {
+          "param": "Sequence",
+          "widget": "fader"
+        },
+        {
+          "param": "Out Ch",
+          "widget": "fader"
+        },
+        {
+          "param": "Clear Note",
+          "widget": "switch"
+        },
+        "empty",
+        {
+          "param": "Reset",
+          "widget": "fader"
+        },
+        {
+          "param": "Group",
+          "widget": "fader"
+        },
+        {
+          "param": "Clear All",
+          "widget": "switch"
+        },
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Pad 1 Note",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty"
+      ]
+    }
+  ]
+}

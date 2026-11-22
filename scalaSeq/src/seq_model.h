@@ -95,6 +95,50 @@ struct Cell
     float prob = 0.0f;   // 0..1
 };
 
+// ---- 2.8: ratio rates (Rate Mode = Ratio: the step is the musical Rate divided by Ratio + Fine) ----
+constexpr int kNumRatios = 15, kDefRatio = 6;   // 1
+inline const char* const* ratioNames()
+{
+    static const char* n[kNumRatios] = {"0.25", "0.33", "0.5", "0.67", "0.75", "0.8", "1", "1.25", "1.33", "1.5",
+                                        "1.67", "2", "2.5", "3", "4"};
+    return n;
+}
+inline double ratioOf(int i, int fine)   // fine in 1/100, -10..10
+{
+    static const double r[kNumRatios] = {0.25, 1.0 / 3, 0.5, 2.0 / 3, 0.75, 0.8, 1.0, 1.25, 4.0 / 3, 1.5,
+                                         5.0 / 3, 2.0, 2.5, 3.0, 4.0};
+    return std::max(0.05, r[std::max(0, std::min(kNumRatios - 1, i))] + fine / 100.0);
+}
+// ---- 2.8: CC numbers for Lock CC and lane CC (0 = off). Skipped (user): 0-5, 7, 10, 11, 32, 64-68,
+// 98-101, 120-127 (bank select, standard controllers the track MIDI filter knows, NRPN/RPN, channel mode).
+inline bool ccAllowed(int c)
+{
+    return c > 0 && c < 120 && !(c <= 5 || c == 7 || c == 10 || c == 11 || c == 32 || (c >= 64 && c <= 68) || (c >= 98 && c <= 101));
+}
+inline int numCCChoices() { int n = 1; for (int c = 0; c < 128; ++c) if (ccAllowed(c)) ++n; return n; }
+inline int ccOfIndex(int i)
+{
+    if (i <= 0) return 0;
+    for (int c = 0; c < 128; ++c) if (ccAllowed(c) && --i == 0) return c;
+    return 0;
+}
+inline int indexOfCC(int cc)
+{
+    if (!ccAllowed(cc)) return 0;
+    int i = 0;
+    for (int c = 0; c <= cc; ++c) if (ccAllowed(c)) ++i;
+    return i;
+}
+// 2.8: a CC lane: one value per step, its own length, rate and direction; sends CC `cc` (0 = off)
+constexpr int kCcLanes = 2, kNumMusRates = 8, kDefLaneRate = 2;   // scalaSeq Rate list; 1/16
+struct CcLane
+{
+    uint8_t cc = 0, steps = 16, rate = kDefLaneRate, mode = 0, ratio = kDefRatio, dir = 0, rest = 64;
+    int8_t fine = 0;
+    uint8_t val[kMaxSteps];
+    CcLane() { std::memset(val, 64, sizeof val); }
+};
+
 struct Note
 {
     float st = 0, len = 1;   // steps
@@ -105,6 +149,16 @@ struct Note
     float gl = 0;            // glide 0..1 steps
     float d = 0.5f;          // duty 0.05..0.95
     Cell ch[kLanes];
+    int8_t lock[4] = {-1, -1, -1, -1};   // 2.8: p-lock values 0..127, -1 = off (sent with Lock CC 1-4)
+};
+// the note layout of project format SSQ4 (no locks)
+struct NoteV4
+{
+    float st, len;
+    int16_t pitch;
+    int8_t r, fd;
+    float v, gl, d;
+    Cell ch[kLanes];
 };
 
 struct Sequence
@@ -112,6 +166,9 @@ struct Sequence
     int steps = 16;
     int rStart = 0, rEnd = 15;   // play range, whole steps
     float swing = 50;            // 50..75 %
+    int mode = 0, ratio = kDefRatio, fine = 0;   // 2.8: Rate Mode (0 musical, 1 ratio), Ratio, Fine (1/100)
+    uint8_t lockCC[4] = {0, 0, 0, 0};            // 2.8: CC numbers of the locks (0 = off)
+    CcLane lane[kCcLanes];                       // 2.8
     int count = 0;
     Note notes[kMaxNotes];
 

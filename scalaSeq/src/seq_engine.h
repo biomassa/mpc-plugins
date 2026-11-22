@@ -31,6 +31,7 @@ struct EngineOut
     float pitch = 0;     // tuned MIDI float
     int step = -1;       // current step
     bool tieStart = false;   // a note started without a gap (TIE): legato
+    int note = -1;           // 2.8: index of the note that sounds (its locks)
 };
 
 class Engine
@@ -237,7 +238,7 @@ public:
             {
                 qon_ = 1; qnew_ = 1; qd_ = dly; qv_ = cv; qlen_ = clen; qrat_ = crat; qpi_ = pidx;
                 qduty_ = fs->duty; qfade_ = fs->fade; qglide_ = glFrac >= 0 ? glFrac * clen : cgl; qmidi_ = fs->midi;
-                qtie_ = tie; qhold_ = hold;
+                qtie_ = tie; qhold_ = hold; qni_ = fs->ni;
             }
         }
 
@@ -258,7 +259,7 @@ public:
             if (lastout_ > 0 && !tienext_) gapc_ = (int)std::floor(sr * 0.003);
             out.tieStart = tienext_ && lastout_ > 0;
             tienext_ = qtie_;
-            act_ = 1; el_ = 0; glen_ = qlen_; grat_ = std::max(qrat_, 1); gvel_ = qv_;
+            act_ = 1; el_ = 0; glen_ = qlen_; grat_ = std::max(qrat_, 1); gvel_ = qv_; curNi_ = qni_;
             gduty_ = qduty_; gfade_ = qfade_; hitprev_ = -1;
             if (!qhold_)
             {
@@ -305,7 +306,7 @@ public:
         if (gapc_ > 0) { gapc_--; g = 0; }
         lastout_ = g;
 
-        out.gate = g; out.vel = hvel; out.pitch = ppitch_; out.step = cur_;
+        out.gate = g; out.vel = hvel; out.pitch = ppitch_; out.step = cur_; out.note = curNi_;
         return out;
     }
 
@@ -330,7 +331,7 @@ private:
     float gvel_ = 0, gduty_ = 0.5f, hvelHit_ = 0, lastout_ = 0;
     float ppitch_ = 60, pfrom_ = 60, pto_ = 60;
     bool tienext_ = false;
-    int qon_ = 0, qnew_ = 0, qrat_ = 1, qpi_ = 0, qfade_ = 0;
+    int qon_ = 0, qnew_ = 0, qrat_ = 1, qpi_ = 0, qfade_ = 0, qni_ = -1, curNi_ = -1;
     float qd_ = 0, qv_ = 0, qlen_ = 1, qduty_ = 0.5f, qglide_ = 0, qmidi_ = 60;
     bool qtie_ = false, qhold_ = false;
     uint32_t rngState_ = 0x9E3779B9u;

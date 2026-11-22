@@ -246,7 +246,7 @@ int main()
         touchAt(p, kVelTX, pv(57, kGW), pv(30, kVelH));
         touchAt(p, kVelTX, pv(57, kGW), pv(15, kVelH));
         lift(p, kVelTX);
-        CHECK(n1 >= 0 && std::fabs(s.notes[n1].v - 15.0f / 60) < 0.03f && p.testSel() == n1, "velocity from the lane: %f", n1 >= 0 ? s.notes[n1].v : -1);
+        CHECK(n1 >= 0 && std::fabs(s.notes[n1].v - 15.0f / kVelH) < 0.03f && p.testSel() == n1, "velocity from the lane: %f", n1 >= 0 ? s.notes[n1].v : -1);
         knob(kSteps, 16);
     }
 
@@ -553,6 +553,156 @@ int main()
         q.internalResume();
         block(q, {});
         CHECK((int)std::lround(q.get(kPadNote)) == 92, "old Pad 1 Note 60 moves to 92: %d", (int)std::lround(q.get(kPadNote)));
+    }
+
+    // ---- 2.7: < > step buttons (Note, Move, Length)
+    {
+        ScalaSeq q;
+        q.internalSetSampleRate(48000); q.internalSetBlockSize(64); q.internalResume();
+        waitWorker(); block(q, {});
+        q.set(kPadNote, 92); q.set(kStepEntry, 1); block(q, {});
+        for (int k : {92, 94, 96}) block(q, {mpc::MidiEvent::noteOn(0, k, 100), mpc::MidiEvent::noteOff(0, k)});
+        q.set(kStepEntry, 0); block(q, {});
+        auto press = [&](int b) { q.set(b, 1); block(q, {}); block(q, {}); };
+        for (int i = 0; i < 5; ++i) press(kNoteNext);
+        CHECK(q.testSel() == 2 && (int)std::lround(q.get(kNoteSel)) == 3, "Note > stops at the last note: %d", q.testSel());
+        CHECK(q.get(kNoteNext) == 0, "the > button is set back to off");
+        for (int i = 0; i < 5; ++i) press(kNotePrev);
+        CHECK(q.testSel() == 0, "Note < stops at the first note: %d", q.testSel());
+        const int steps = q.testModel().seqs[0].steps;
+        for (int i = 0; i < 300; ++i) press(kMoveNext);
+        const Note& m = q.testModel().seqs[0].notes[q.testSel()];
+        CHECK(std::fabs(m.st + m.len - steps) < 1e-4, "Move > stops at the sequence end: %f + %f of %d", m.st, m.len, steps);
+        press(kLenNext);
+        CHECK(std::fabs(q.testModel().seqs[0].notes[q.testSel()].len - m.len) < 1e-4, "Len > stops at the sequence end");
+        press(kLenPrev);
+    }
+
+    // ---- 2.8: CC lanes, locks, ratio rate, SSQ5 state
+    {
+        auto fresh = [](ScalaSeq& u) { u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume(); waitWorker(); block(u, {}); };
+        auto playQ = [](ScalaSeq& u, double a, double b) { const double d = 64 * 120.0 / 60 / 48000; for (double q = a; q < b; q += d) block(u, {}, q); };
+        auto stopU = [](ScalaSeq& u) { block(u, {}); block(u, {}); };
+        {
+            ScalaSeq u; fresh(u);
+            Sequence& q = u.testModel().seqs[0];
+            q.count = 0;
+            CcLane& L = q.lane[0];
+            L.cc = 20; L.steps = 4; L.rest = 33; L.val[0] = 10; L.val[1] = 10; L.val[2] = 50; L.val[3] = 50;
+            u.internalResume(); block(u, {}); takeLog(u);
+            playQ(u, 0, 0.99);
+            stopU(u);
+            auto log = takeLog(u);
+            std::vector<int> v;
+            for (auto& m : log) if ((m[0] & 0xF0) == 0xB0 && m[1] == 20) v.push_back(m[2]);
+            const int ch = (int)std::lround(u.get(kFirstCh)) - 1;
+            bool chOk = true;
+            for (auto& m : log) if ((m[0] & 0xF0) == 0xB0 && m[1] == 20 && (m[0] & 15) != ch) chOk = false;
+            CHECK(v.size() == 3 && v[0] == 10 && v[1] == 50 && v[2] == 33, "lane: 10, 50, then Rest 33 at stop (%zu values)", v.size());
+            CHECK(chOk, "lane CCs on First Ch");
+        }
+        {
+            ScalaSeq u; fresh(u);
+            Sequence& q = u.testModel().seqs[0];
+            q.count = 1; q.notes[0] = Note(); q.notes[0].st = 0; q.notes[0].len = 0.5f; q.notes[0].lock[0] = 90;
+            q.lockCC[0] = 74;
+            u.internalResume(); block(u, {}); takeLog(u);
+            playQ(u, 0, 0.2);
+            stopU(u);
+            auto log = takeLog(u);
+            int iCC = -1, iOn = -1;
+            for (size_t i = 0; i < log.size(); ++i)
+            {
+                if ((log[i][0] & 0xF0) == 0xB0 && log[i][1] == 74 && log[i][2] == 90 && iCC < 0) iCC = (int)i;
+                if ((log[i][0] & 0xF0) == 0x90 && log[i][2] > 0 && iOn < 0) iOn = (int)i;
+            }
+            CHECK(iCC >= 0 && iOn >= 0 && iCC < iOn, "lock CC 74 90 before the note-on (%d, %d)", iCC, iOn);
+        }
+        {
+            ScalaSeq u; fresh(u);
+            Sequence& q = u.testModel().seqs[0];
+            q.steps = 4; q.rStart = 0; q.rEnd = 3; q.count = 4;
+            for (int i = 0; i < 4; ++i) { q.notes[i] = Note(); q.notes[i].st = (float)i; q.notes[i].len = 0.5f; }
+            q.mode = 1; q.ratio = 11;   // x2
+            u.internalResume(); block(u, {}); takeLog(u);
+            playQ(u, 0, 0.98);
+            stopU(u);
+            int ons = 0;
+            for (auto& m : takeLog(u)) if ((m[0] & 0xF0) == 0x90 && m[2] > 0) ++ons;
+            CHECK(ons == 8, "ratio 2: 8 notes in one quarter: %d", ons);
+        }
+        {
+            ScalaSeq u; fresh(u);
+            Sequence& q = u.testModel().seqs[3];
+            q.mode = 1; q.ratio = 8; q.fine = -2; q.lockCC[1] = 30;
+            q.lane[1].cc = 21; q.lane[1].steps = 9; q.lane[1].val[8] = 99;
+            q.count = 1; q.notes[0] = Note(); q.notes[0].lock[2] = 44;
+            u.testSaveAll(); block(u, {});
+            std::vector<uint8_t> out;
+            u.saveExtraState(out);
+            CHECK(out.size() > 4 && out[3] == '5', "state format SSQ5");
+            ScalaSeq w; fresh(w);
+            w.loadExtraState(out.data(), out.size());
+            w.internalResume(); block(w, {});
+            const Sequence& r = w.testModel().seqs[3];
+            CHECK(r.mode == 1 && r.ratio == 8 && r.fine == -2 && r.lockCC[1] == 30 && r.lane[1].cc == 21 && r.lane[1].steps == 9
+                  && r.lane[1].val[8] == 99 && r.count == 1 && r.notes[0].lock[2] == 44 && r.notes[0].lock[0] == -1, "state: 2.8 data");
+        }
+    }
+
+    // ---- COPY / PASTE / CLEAR of the edited sequence (PASTE and CLEAR: two touches), clipboard shared by instances
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        { Sequence& q0 = u.testModel().seqs[0]; q0.count = 1; q0.notes[0] = Note(); q0.notes[0].st = 2; q0.lane[0].cc = 40; q0.mode = 1; u.internalResume(); }
+        block(u, {});
+        auto tap = [&](ScalaSeq& x, int i) { x.set(i, 1 - x.get(i)); block(x, {}); block(x, {}); };
+        u.set(kSequence, 1); block(u, {}); block(u, {});
+        tap(u, kSeqCopy);
+        CHECK(u.get(kSeqCopy) == 0, "COPY is set back to off");
+        u.set(kSequence, 3); block(u, {}); block(u, {});
+        tap(u, kSeqPaste);
+        CHECK(u.testModel().seqs[2].count == 0, "PASTE: one touch only arms");
+        tap(u, kSeqPaste);
+        CHECK(u.testModel().seqs[2].count == 1 && u.testModel().seqs[2].lane[0].cc == 40 && u.testModel().seqs[2].mode == 1,
+              "PASTE: the sequence with all its data");
+        ScalaSeq w;
+        w.internalSetSampleRate(48000); w.internalSetBlockSize(64); w.internalResume();
+        waitWorker(); block(w, {});
+        w.set(kSequence, 5); block(w, {}); block(w, {});
+        tap(w, kSeqPaste); tap(w, kSeqPaste);
+        CHECK(w.testModel().seqs[4].count == 1 && w.testModel().seqs[4].lane[0].cc == 40, "PASTE in another instance");
+        tap(u, kSeqClear); tap(u, kSeqClear);
+        CHECK(u.testModel().seqs[2].count == 0 && u.testModel().seqs[2].lane[0].cc == 0 && u.testModel().seqs[2].mode == 0
+              && u.testModel().seqs[0].count == 1, "CLEAR: only the edited sequence, back to a new one");
+    }
+
+    // ---- SEND: one CC at 64 for MIDI Learn; nothing while the CC is off
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        u.set(kSequence, 1); block(u, {});
+        u.testModel().seqs[0].lockCC[0] = 74;
+        block(u, {}); takeLog(u);
+        u.set(kSend0, 1); block(u, {}); block(u, {});
+        for (int b = 0; b < 600; ++b) block(u, {});   // 0.8 s of audio: the zigzag runs
+        CHECK(u.get(kSend0) > 0.5f, "SEND stays on while it sends");
+        u.set(kSend0, 0); block(u, {}); block(u, {});   // touch again: stop with 64
+        auto log = takeLog(u);
+        std::vector<int> v;
+        for (auto& m : log) if ((m[0] & 0xF0) == 0xB0 && m[1] == 74) v.push_back(m[2]);
+        CHECK(v.size() >= 4 && v[0] == 0 && v[1] == 127 && v[2] == 0 && v.back() == 64, "SEND: zigzag 0 127 0 ... then 64 (%zu values)", v.size());
+        u.set(kSend0, 1); block(u, {});
+        for (int b = 0; b < 11300; ++b) block(u, {});   // 15 s of audio
+        CHECK(u.get(kSend0) == 0, "SEND stops by itself after 15 s");
+        takeLog(u);
+        u.set(kSend0 + 1, 1); block(u, {}); block(u, {});   // Lock CC 2 is off
+        u.set(kSend0 + 4, 1); block(u, {}); block(u, {});   // VEL is shown: no lane CC
+        int cc = 0;
+        for (auto& m : takeLog(u)) if ((m[0] & 0xF0) == 0xB0) ++cc;
+        CHECK(cc == 0, "SEND sends nothing while the CC is off (%d)", cc);
     }
 
     std::printf(g_fail ? "%d FAILED\n" : "plugin tests passed\n", g_fail);

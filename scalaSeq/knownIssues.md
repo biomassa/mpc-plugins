@@ -86,3 +86,40 @@
   - One row step sends about 147 display changes with 16 notes, because the notes change display slots when a note scrolls in or out of view.
 - Possible fixes, not done: keep each note in the same display slot (no visible change), redraw the notes only when the finger lifts, or send the roll updates less often during a drag.
 - Not known: if a drag on other controls (another plugin, the MPC's own screens) also makes the audio crackle.
+
+## Mask pads (2.6.0)
+
+- Not tested on the MPC. The pads are Button widgets with the degree text (a Name label with WithName) under them; the Open MPC project found that labels on top of buttons take the taps. percSeq 1.0.1 uses the same pads on its POOL page; also not yet confirmed on the MPC.
+
+## Lists and faders (2.6.0)
+
+- Not tested on the MPC: the drawn lists (Button radio groups in custom components, shown with a visibility rule on "List Open"). The button texts are pictures drawn with the Mac's Helvetica font.
+- The MPC's own list overlay opens empty for these plugins (seen with percSeq on the MPC One G2).
+
+## Text sizes and step controls (2.7.0)
+
+- Not tested on the MPC. The SDK docs give the font height in pixels but do not say if it is the em size or the ascent plus descent of the font. The text widths were measured with Titillium Web (the MPC's font) for both cases. In the em case, the fader names and values fit only because each uses the full slot width; Root Tune (-100.0) can touch its name in that case.
+- The < > buttons are momentary parameters (Note Prev/Next, Move Prev/Next, Len Prev/Next): the button sets the parameter on, the plugin steps the value and sets it back to off. Not known: if a fast double tap on the MPC gives two steps.
+- A Q-Link turn on Hit, Move, Length or Row can still give a value the plugin does not use; the plugin writes back the value it uses (as before). There is no fader handle now, so nothing springs back on the screen.
+- Host simulator: with some random seeds the state round trip reports a parameter that the plugin sets on load by design (seed 1234 with the transport playing: Play X, the playhead display). Not caused by this version as far as the code shows; the 1.1.0 build was not run again with the same seeds to compare.
+
+## Ratio rates, locks and lanes (2.8.0)
+
+- Not tested on the MPC.
+- The lane bars and the velocity bars are XYPad markers with pads twice the lane height (as the velocity bars before); the lower half is under a mask and under the LANE controls. The validator warns that these pads overlap the Q-Link frames (accepted).
+- COPY / PASTE / CLEAR: the copy is held in memory only (not in the project). PASTE waits for the next audio block if another instance is copying at the same moment.
+- Host simulator: with some seeds the state round trip reports a one-touch button (Copy, Paste, Clear Seq, SEND, the < > buttons) as not restored: the plugin sets them back to off on load (by design).
+- Measured 2026-11-22 (percSeq, MPC One G2): a single CC message reached the MPC (MIDI Monitor) but MIDI Learn ignored it; a lane playing changing CC 74 values with no notes was learned. While notes also play, Learn takes the first note. Also measured: MIDI Learn turns off when its page is left. So SEND keeps sending a zigzag until a second touch or 15 s. Confirmed on the MPC One G2 (2026-11-22, percSeq): MIDI Learn takes the CC from SEND. Not separated: whether Learn needs changing values or only several messages.
+- Not known: if WithName titles on generated faders (CC Num, Steps, Fine on LANE) show on the G2.
+- The host simulator lists choices that look like numbers (Ratio) as a float; the skin script uses its own ratio list.
+- Not measured on the MPC: the display traffic of a lane redraw (up to 64 bars per page).
+- SETUP: in the em font case, "Steps/Page" and its value ("16 st") touch.
+- Lanes, Lock CCs and the rate mode are stored per sequence (user choice); Rate itself is one setting for all sequences.
+
+## Tests
+
+- The plugin test "MPC song position pattern" sometimes fails on a busy computer: it waits 2.5 ms of real time for the MIDI thread after each block, and a late MIDI thread puts a note on the next block. The committed 2.5.0 code fails it the same way (1 of 3 runs, 2026-11-22).
+
+## Port settings (2026-11-22)
+
+- Measured on the MPC One G2: with Global on for "scalaSeq MIDI Out", selecting the scalaSeq track made a MIDI loop (pads blinking, broken sound); with Control off, SEND did not reach MIDI Learn. See "The port settings on the MPC" in the README. SEND with Control on is not yet confirmed.

@@ -53,8 +53,9 @@ int main(int argc, char** argv)
         const double t = monoNs() / 1e6;
         if (ev->type == alsa::kNoteOn || ev->type == alsa::kNoteOff)
             std::fprintf(f, "%.4f %d %d %d %d\n", t, ev->type, ev->data.note.channel, ev->data.note.note, ev->data.note.velocity);
-        else if (ev->type == alsa::kPitchBend)
-            std::fprintf(f, "%.4f %d %d %d\n", t, ev->type, ev->data.control.channel, ev->data.control.value);
+        else   // controllers and everything else: type, channel, param (CC number), value
+            std::fprintf(f, "%.4f %d %d %u %d\n", t, ev->type, ev->data.control.channel, (unsigned)ev->data.control.param, ev->data.control.value);
+        std::fflush(f);
     }
     std::fclose(f);
     return 0;
