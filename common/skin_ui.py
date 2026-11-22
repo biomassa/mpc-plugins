@@ -30,6 +30,8 @@ BODY_Y = 52                              # the control under it (fader strip, pa
 PAD_PX, PAD2_PX = 26, 22                 # captions of 1-row and 2-row list pads (pictures)
 OPT_PX, TITLE_PX = 28, 34                # pop-up list options (pictures) and the pop-up title
 ARROW_PX = 34                            # < and > of the step controls (pictures)
+# SEQ page Q-Link panel (2026-11-22, user): names 24 px light grey, values 34 px white, bank titles light grey
+SEQ_NAME_PX, SEQ_VALUE_PX, SEQ_LEGEND_C = 24, 34, "ffe8e6df"
 FONT_PATHS = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/HelveticaNeue.ttc",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
 
@@ -117,15 +119,19 @@ class Lists:
         self.images = {}
         self.defs = []   # (name, CustomComponentDefinition) for localComponentDefinitions
 
-    def _container(self, name, children, rect, visible_when=None):
+    def _container(self, name, children, rect, visible_when=None, hide_qlink=False):
         """One entry for a list control (its parts in a custom component), so the page and its Q-Link
         frames see one control of slot size (or one full-page layer for a panel)."""
         x0, y0 = (float(v) for v in rect.split()[:2])
-        self.defs.append((name, {"version": 2, "actions": [],
-                                 "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": "0", "image": ""},
-                                                    "unfocussed": {"version": 1, "colour": "0", "image": ""}},
-                                 "ignoreMousePresses": False, "disableCoarseDataWheel": True,
-                                 "componentsData": _local(children, x0, y0)}))
+        d = {"version": 4 if hide_qlink else 2, "actions": [],
+             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": "0", "image": ""},
+                                "unfocussed": {"version": 1, "colour": "0", "image": ""}},
+             "ignoreMousePresses": False, "disableCoarseDataWheel": True}
+        if hide_qlink:   # 2026-11-22: version 4: no Q-Link frame over the component while it is shown (ui-reference 4.1)
+            d["repeats"] = 1
+            d["hideQLinkBounds"] = True
+        d["componentsData"] = _local(children, x0, y0)
+        self.defs.append((name, d))
         e = _entry(name, name, {"version": 1, "handleName": "Data"}, rect, visible_when)
         e["bounds"]["acceptsHWFocus"] = "Children"
         return [e]
@@ -203,7 +209,7 @@ class Lists:
             on = self._img(f"opt_{i}_{key}_{bw}_on", bw, bh, c, ON_C, DARK_C, OPT_PX)
             off = self._img(f"opt_{i}_{key}_{bw}_off", bw, bh, c, OFF_C, (0xe4, 0xe4, 0xe6), OPT_PX)
             out.append(_button(f"{prefix}_{i}", f"Parameter {pidx}", on, off, i, n, f"{bx} {by} {bw} {bh}"))
-        return self._container(f"{self.tag}_{prefix}", out, "0 0 1280 628", vis)
+        return self._container(f"{self.tag}_{prefix}", out, "0 0 1280 628", vis, hide_qlink=True)
 
 
     def text_button(self, prefix, pidx, label, k):
@@ -213,6 +219,43 @@ class Lists:
         off = self._img(f"tb_{label}_off", 248, 90, label, OFF_C, (0xe4, 0xe4, 0xe6), NAME_PX)
         out = [_button(f"{prefix}_b", f"Parameter {pidx}", on, off, 1, 1, f"{x + 15} {y + 8} 248 90")]
         return self._container(f"{self.tag}_{prefix}", out, f"{x} {y} {SLOT_W} {SLOT_H}")
+
+    def seq_cell(self, prefix, pidx, rect, drag=True):
+        """A touch cell of the SEQ page Q-Link panel (2026-11-22): a tap selects the Q-Link column
+        (Mouse Down -> Q-Link), a double-tap or Enter opens the big knob editor, and (drag=True) a
+        vertical drag on the value changes it. The value text is drawn here (34 px, white); the name
+        label stays on the page under the cell. Same structure as the generated kit faders (a container
+        with the actions and a Knob inside), which select their column on the G2.
+        drag=False: the value is a Label (no drag), for values the plugin limits (a drag could jump)."""
+        name = "seqCellDrag" if drag else "seqCellStep"
+        if not any(n == name for n, _ in self.defs):
+            w, h = (float(v) for v in rect.split()[2:])
+            style = {"version": 1, "font": {"version": 1, "name": "Titillium Web", "style": "SemiBold",
+                                            "height": float(SEQ_VALUE_PX)},
+                     "colour": "ffffffff", "justification": "left verticallyCentred", "case": "Original"}
+            focus = _entry("focus", "Focus", {"version": 1, "backgroundColour": "19ffffff", "outlineColour": "ffe4e4e6",
+                                              "backgroundInset": 2.0, "outlineThickness": 1.0}, f"0 0 {w:g} {h:g}")
+            focus["bounds"]["whenVisible"] = "WhenFocussed"
+            vrect = f"2 {h - 44:g} {w - 4:g} 42"
+            # the value text is a Label: the ValueSlider knob drew no text on the G2 (user photo, 2026-11-22)
+            value = [_entry("value", "Label", {"version": 1, "textStyle": style, "type": "Value", "handleName": "Data"}, vrect)]
+            if drag:   # the knob on top of the label takes the drag
+                value.append(_entry("drag", "Knob", {"version": 4, "knobType": "ValueSlider", "textStyle": style,
+                                                     "dragOrientation": "Vertical", "handleName": "Data"}, vrect))
+            act = lambda on, handler, extra: {"version": 1, "onAction": on, "handler": handler, "handleName": "Data",
+                                              "additionalData": extra}
+            self.defs.append((name, {"version": 2,
+                                     "actions": [act("Mouse Down", "Q-Link", ""),
+                                                 act("Double Click", "Show Overlay", "knob overlay"),
+                                                 act("Enter Pressed", "Show Overlay", "knob overlay")],
+                                     "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": "0", "image": ""},
+                                                        "unfocussed": {"version": 1, "colour": "0", "image": ""}},
+                                     "ignoreMousePresses": False, "disableCoarseDataWheel": True,
+                                     "componentsData": [focus] + value}))
+        e = _entry(prefix, name, {"version": 1, "handleName": "Data"}, rect)
+        e["handle remapping"]["map"] = [{"key": "Data", "value": f"Parameter {pidx}"}]
+        e["bounds"]["acceptsHWFocus"] = "Yes"
+        return e
 
     def step_control(self, prefix, pidx, prev_idx, next_idx, k, title=None):
         """A < value > control in slot k: the name on top, then a < button, the value and a > button.

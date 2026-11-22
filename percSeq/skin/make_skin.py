@@ -49,6 +49,8 @@ ZOOMN = 4                                 # Steps/Page 8, 16, 32, 64
 TOGX, TOGW = 4, 20                        # row on/off squares
 SHADE_C = "a01e1d1e"                      # over an off row (63 % background)
 NOTE_C, SEL_C, DARK_C = "d9a64d", "5dcaa5", "1e1d1e"
+ROWNUM_C, LABNOTEW = "ff8a8885", 30       # 2026-11-22: row numbers (dim grey); width of the note on the SEQ row labels
+LNPLAYH = 4                               # 2026-11-22: LANE playhead line height
 
 P = {}   # parameter name -> index (from build/params.json)
 
@@ -132,9 +134,11 @@ BANKS = [("HIT", ["Hit", "Row", "Move", "Length"]),
          ("SHAPE", ["VEL", "RATCH", "FADE", "DUTY"]),
          ("ENTRY", ["Entry Len", "Snap", "Sel Row", "Rate"]),
          ("VIEW", ["Page", "Sequence", "Steps", "Nudge"])]
+# panel cells without drag: values that percSeq limits (they have < > step controls on the other pages)
+NO_DRAG = {"Hit", "Row", "Move", "Length", "Sel Row"}
 
 
-def seq_tab():
+def seq_tab(lists):
     c = []
     ly = prm("Line Y")
     # header: names 24 px, values 30 px
@@ -149,19 +153,17 @@ def seq_tab():
     c.append(value_label("v_page", prm("View Text"), f"{x + 42} 2 62 40", 28, "ffffffff", "horizontallyCentred verticallyCentred"))
     c.append(button("pagenext", prm("Page Next"), "psq_next.png", "psq_next.png", 1, 1, f"{x + 106} 2 40 40"))
     c.append(button("follow", prm("Follow"), "psq_followon.png", "psq_followoff.png", 1, 1, f"{x + 152} 2 {PANELX - 6 - (x + 152)} 40"))
-    # "more" (hits that are not drawn) at the right end of the ruler
-    c.append(value_label("v_more", prm("More Text"), f"{GX + GW - 70} {RY} 66 {RH}", 22, "ffd9a64d", "right verticallyCentred"))
     c.append(name_label("h_entry", named("STEP ENTRY", "Step Entry"), f"{PANELX} 2 170 40", 24, "ff8a8885"))
     c.append(value_label("v_entry", prm("Step Entry"), f"{PANELX + 170} 2 {1276 - PANELX - 170} 40", 30, "ff5dcaa5"))
-    # Q-Link panel: the 4 banks as columns (the MPC frames the active bank)
+    # Q-Link panel: the 4 banks as columns (the MPC frames the active bank). The names are labels here;
+    # the values are touch cells on top of the page (panel_cells)
     for b, (title, names) in enumerate(BANKS):
         x = PANELX + b * QCOLW
-        c.append(name_label(f"bank{b}", named(title, names[0]), f"{x + 2} {RY} {QCOLW - 4} 28", 20, "ff8a8885"))
+        c.append(name_label(f"bank{b}", named(title, names[0]), f"{x + 2} {RY} {QCOLW - 4} 28", 20, skin_ui.SEQ_LEGEND_C))
         for k, nm in enumerate(names):
             y = RY + 32 + k * 110
             h = named(SHORT[nm], nm) if nm in SHORT else prm(nm)
-            c.append(name_label(f"q{b}_{k}_n", h, f"{x + 2} {y} {QCOLW - 4} 30", 22, "ffb4b2a9"))
-            c.append(value_label(f"q{b}_{k}_v", prm(nm), f"{x + 2} {y + 32} {QCOLW - 4} 42", 32))
+            c.append(name_label(f"q{b}_{k}_n", h, f"{x + 2} {y} {QCOLW - 4} 30", skin_ui.SEQ_NAME_PX, skin_ui.SEQ_LEGEND_C))
     # roll background and the row lines (fixed: 16 equal rows, row 1 at the bottom)
     c.append(image("rollbg", "ff1a1a1a", f"{GX} {GY} {GW} {GH}"))
     for i in range(ROWS + 1):
@@ -203,12 +205,18 @@ def seq_tab():
     c.append(xypad("selchance", prm("Sel Chance X"), prm("Sel Y"), "psq_chance.png", xpark_rect(GX, BADGEW, GY, GH)))
     # row labels left of the roll: "row note"
     for r in range(ROWS):
-        c.append(value_label(f"lab{r + 1}", prm(f"Lab {r + 1}"), f"4 {row_top(r):.2f} {GX - 8} {ROWH:.2f}", 18, "ffb4b2a9",
-                             "right verticallyCentred"))
+        # 2026-11-22 (user): the row number dim grey, the note white (the note right-aligned at the roll)
+        c.append(name_label(f"labrow{r + 1}", named(str(r + 1), f"Lab {r + 1}"), f"4 {row_top(r):.2f} {GX - 8 - LABNOTEW - 4} {ROWH:.2f}",
+                            18, ROWNUM_C, "right verticallyCentred", "SemiBold"))
+        c.append(value_label(f"lab{r + 1}", prm(f"Note Text {r + 1}"), f"{GX - 4 - LABNOTEW} {row_top(r):.2f} {LABNOTEW} {ROWH:.2f}",
+                             18, "ffffffff", "right verticallyCentred"))
     # ruler and its numbers
     c.append(image("ruler", "ff262626", f"{GX} {RY} {GW} {RH}"))
     for m in range(NUMS):
         c.append(xypad(f"num{m + 1}", prm(f"Num X {m + 1}"), ly, f"psq_n{m + 1}.png", xpark_rect(GX, NUMW, RY, RH)))
+    # (drawn after the ruler, so the ruler does not cover it)
+    # "more" (hits that are not drawn) at the right end of the ruler
+    c.append(value_label("v_more", prm("More Text"), f"{GX + GW - 70} {RY} 66 {RH}", 22, "ffd9a64d", "right verticallyCentred"))
     # cursor, Group lines, then each row's end bar and playhead (on top of the hits)
     c.append(xypad("cursor", prm("Cursor X"), ly, "psq_cursor.png", vpad))
     for i in range(GRPLINES):
@@ -217,6 +225,10 @@ def seq_tab():
         rpad = f"{GX} {row_top(r):.2f} {GW + PARK} {ROWH:.2f}"
         c.append(xypad(f"end{r + 1}", prm(f"End X {r + 1}"), ly, "psq_end.png", rpad))
     c.append(image("parkmask", BG, f"{GX + GW + 1} {GY - 4} {PANELX - (GX + GW) - 6} {GH + 8}"))
+    # 2026-11-22 (user): row numbers 1-16 (from the bottom) at the right of the roll, 22 px white, on top of the mask
+    for r in range(ROWS):
+        c.append(name_label(f"rnum{r + 1}", named(str(r + 1), f"Lab {r + 1}"), f"{GX + GW + 4} {row_top(r):.2f} {PANELX - (GX + GW) - 10} {ROWH:.2f}",
+                            22, "ffffffff", "left verticallyCentred", "SemiBold"))
     # 1.3: the velocity lane moved to the LANE page
     # FREE button: grey, lit while held
     c.append(image("freebg", "ff3a3a3c", f"{FREEX} {FREEY} {FREEW} {FREEH}"))
@@ -249,6 +261,11 @@ def seq_tab():
         c.insert(c.index(next(e for e in c if e["componentData"]["name"] == "touchguard")), entry(f"rowon{r + 1}", "Button", {"version": 2, "onImage": "psq_togon.png", "offImage": "psq_togoff.png",
                                                     "buttonId": 1, "numButtonsInGroup": 1, "handleName": prm(f"On {r + 1}"),
                                                     "gestureBehaviour": "Instant"}, f"{TOGX} {y:.2f} {TOGW} {TOGW}"))
+    # 2026-11-22: the panel's touch cells, on top of the touch guard
+    for b, (title, names) in enumerate(BANKS):
+        for k, nm in enumerate(names):
+            c.append(lists.seq_cell(f"q{b}_{k}_v", P[nm], f"{PANELX + b * QCOLW} {RY + 32 + k * 110} {QCOLW} 76",
+                                    drag=nm not in NO_DRAG))
     root = {"version": 2, "actions": [],
             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": BG, "image": ""},
                                "unfocussed": {"version": 1, "colour": BG, "image": ""}},
@@ -276,8 +293,12 @@ def pool_tab(fn_index):
         y = SLOT_Y[3 - r // 4] + (SLOT_H - PADH) // 2
         # 1.0.1: the label under the button (Open MPC: labels on top of buttons swallow taps); the
         # button pictures are frames with a transparent middle, so the text shows through
-        c.append(value_label(f"poollab{r + 1}", prm(f"Lab {r + 1}"), f"{x} {y} {PADW} {PADH}", 44, "ffffffff",
-                             "horizontallyCentred verticallyCentred"))
+        # 2026-11-22 (user): the row number dim grey, the note white, side by side around the pad centre
+        cx = x + PADW // 2
+        c.append(name_label(f"poolrow{r + 1}", named(str(r + 1), f"Lab {r + 1}"), f"{x} {y} {cx - 6 - x} {PADH}", 44, ROWNUM_C,
+                            "right verticallyCentred", "SemiBold"))
+        c.append(value_label(f"poollab{r + 1}", prm(f"Note Text {r + 1}"), f"{cx + 6} {y} {x + PADW - cx - 6} {PADH}", 44,
+                             "ffffffff", "left verticallyCentred"))
         c.append(button(f"pool{r + 1}", prm(f"Row {r + 1}"), "psq_poolon.png", "psq_pooloff.png", 1, 1, f"{x} {y} {PADW} {PADH}"))
     root = {"version": 2, "actions": [],
             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": BG, "image": ""},
@@ -338,7 +359,7 @@ def pictures():
     png_pixels(os.path.join(OUT, "psq_chance.png"), BADGEW, NOTEH, ring)
     png_pixels(os.path.join(OUT, "psq_vel.png"), VELW, VH, lambda x, y: hexc(NOTE_C))
     for k in range(ZOOMN):   # 1.3: CC lane bars (amber), one width per Steps/Page size
-        png_pixels(os.path.join(OUT, f"psq_lnplay{k}.png"), round(GW / (8 << k)), VH, lambda x, y: (0xff, 0xff, 0xff, 0x40))
+        png_pixels(os.path.join(OUT, f"psq_lnplay{k}.png"), round(GW / (8 << k)), LNPLAYH, lambda x, y: hexc("d31145"))   # 2026-11-22: red line
         png_pixels(os.path.join(OUT, f"psq_lnbar{k}.png"), max(2, int(GW / (8 << k)) - 2), VH, lambda x, y: hexc(NOTE_C))
     for i, nm in enumerate(("VEL", "CC 1", "CC 2")):
         skin_ui.text_png(os.path.join(OUT, f"psq_lane{i}_on.png"), 90, 40, nm, skin_ui.ON_C, skin_ui.DARK_C, 24)
@@ -442,11 +463,6 @@ def lane_parts():
         e["bounds"]["additionalInvalidatingHandles"] = hs
         return e
     c.append(image("lanebg", "ff1a1a1a", f"{GX} {VY} {GW} {VH}"))
-    # the current step of the shown CC lane (white 25 %, as the SEQ playhead), behind the bars
-    for k in range(ZOOMN):
-        w = GW / (8 << k)
-        c.append(vis(xypad(f"lnplay{k}", prm(f"Lane Play X {k + 1}"), fixed0, f"psq_lnplay{k}.png", xpark_rect(GX, w, VY, VH)),
-                     [zoom_vis(k), f"RangedEnabling/1/2/3/{lane}"]))
     # CC bars: one set per Steps/Page size; bar j of a set sits in step column j of the page
     for k in range(ZOOMN):
         z = 8 << k
@@ -465,6 +481,12 @@ def lane_parts():
     c.append(image("lanemask", BG, f"0 {VY + VH} 1280 {VH + 4}"))
     c.append(image("lanemaskl", BG, f"0 {VY} {GX} {VH}"))
     c.append(image("lanemaskr", BG, f"{GX + GW} {VY} {1280 - GX - GW} {VH}"))
+    # 2026-11-22 (user): the current step of the shown lane (VEL: the selected row's step) as a thin red
+    # line under the bars, as wide as the step; on top of the mask, so no bar hides it
+    for k in range(ZOOMN):
+        w = GW / (8 << k)
+        c.append(vis(xypad(f"lnplay{k}", prm(f"Lane Play X {k + 1}"), fixed0, f"psq_lnplay{k}.png",
+                           xpark_rect(GX, w, VY + VH + 2, LNPLAYH)), [zoom_vis(k)]))
     c.append(xypad("touchguard", fixed0, fixed0, "psq_none.png", "0 0 1280 628"))
     c.append(xypad("t_lane", f"ResetOnGestureEnd/{prm('Touch lane X')}", f"ResetOnGestureEnd/{prm('Touch lane Y')}", "psq_none.png",
                    f"{GX} {VY} {GW} {VH}"))
@@ -586,7 +608,7 @@ def main():
                 x0, y0 = skin_ui.SLOT_X[3] + 4, skin_ui.SLOT_Y[0]
                 w, h = 4 * MPADW + 3 * MGAP, 4 * MPADH + 3 * MGAP
                 t["qlinkBoundsData"][-1] = f"{x0 - 10} {y0 - 10} {w + 20} {h + 20}"
-        tabs.insert(0, seq_tab())
+        tabs.insert(0, seq_tab(lists))
         tabs.append(pool_tab(len(tabs)))
         # 1.3: the page order (user); each tab's old number -> its new number (also for Q-Links.json below)
         old_no = {t["tabName"]: t["fnKeyIndex"] + 1 for t in tabs}
@@ -602,9 +624,13 @@ def main():
         tui = tui.replace(rs, rs + "\n" + json.dumps({"key": prm("Sel Row"), "value": [str(i) for i in range(1, ROWS + 1)]}) + ",", 1)
         tui = fine_by_default(tui)
         # the ROW page shows "Sel Row" as "Row" (the generated pages are the only place with this remap)
+        # (2026-11-22: the SEQ panel's Sel Row cell binds it too; rename only inside the ROW tab)
         sel = f'"DisableCoarseIncrement/Parameter {P["Sel Row"]}"'
-        assert tui.count(sel) == 1, tui.count(sel)
-        tui = tui.replace(sel, f'"DisableCoarseIncrement/WithName[Row]/Parameter {P["Sel Row"]}"')
+        r0 = tui.index('"tabName": "ROW"')
+        r1 = tui.find('"tabName": ', r0 + 10)
+        r1 = len(tui) if r1 < 0 else r1
+        assert tui[r0:r1].count(sel) == 1, tui[r0:r1].count(sel)
+        tui = tui[:r0] + tui[r0:r1].replace(sel, f'"DisableCoarseIncrement/WithName[Row]/Parameter {P["Sel Row"]}"') + tui[r1:]
         with open(os.path.join(OUT, "TUI.json"), "w") as f:
             f.write(tui)
         qmap = {f"Q-Link {n}": -1 for n in range(1, 17)}

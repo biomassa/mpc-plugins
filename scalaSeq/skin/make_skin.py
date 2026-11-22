@@ -149,9 +149,11 @@ BANKS = [("NOTE", ["Note", "Degree", "Period", "Move"]),
          ("SHAPE", ["Length", "VEL", "GLIDE", "RATCH"]),
          ("RATCH", ["FADE", "DUTY", "Entry Len", "Snap"]),
          ("VIEW", ["View Low", "View Start", "Sequence", "Nudge"])]
+# panel cells without drag: values that scalaSeq limits (they have < > step controls on the other pages)
+NO_DRAG = {"Note", "Move", "Length"}
 
 
-def seq_tab():
+def seq_tab(lists):
     c = []
     ly = prm("Line Y")
     # header: names 24 px, values 30 px
@@ -163,15 +165,15 @@ def seq_tab():
         x += nw + vw + 10
     c.append(name_label("h_entry", named("STEP ENTRY", "Step Entry"), f"{PANELX} 2 170 40", 24, "ff8a8885"))
     c.append(value_label("v_entry", prm("Step Entry"), f"{PANELX + 170} 2 {1276 - PANELX - 170} 40", 30, "ff5dcaa5"))
-    # Q-Link panel: the 4 banks as columns (the MPC frames the active bank)
+    # Q-Link panel: the 4 banks as columns (the MPC frames the active bank). The names are labels here;
+    # the values are touch cells on top of the page (end of this function)
     for b, (title, names) in enumerate(BANKS):
         x = PANELX + b * QCOLW
-        c.append(name_label(f"bank{b}", named(title, names[0]), f"{x + 2} {RY} {QCOLW - 4} 28", 20, "ff8a8885"))
+        c.append(name_label(f"bank{b}", named(title, names[0]), f"{x + 2} {RY} {QCOLW - 4} 28", 20, skin_ui.SEQ_LEGEND_C))
         for k, nm in enumerate(names):
             y = RY + 32 + k * 110
             h = named(SHORT[nm], nm) if nm in SHORT else prm(nm)
-            c.append(name_label(f"q{b}_{k}_n", h, f"{x + 2} {y} {QCOLW - 4} 30", 22, "ffb4b2a9"))
-            c.append(value_label(f"q{b}_{k}_v", prm(nm), f"{x + 2} {y + 32} {QCOLW - 4} 42", 32))
+            c.append(name_label(f"q{b}_{k}_n", h, f"{x + 2} {y} {QCOLW - 4} 30", skin_ui.SEQ_NAME_PX, skin_ui.SEQ_LEGEND_C))
     # roll background, row lines and period lines (they park above the roll, under the ruler)
     c.append(image("rollbg", "ff1a1a1a", f"{GX} {GY} {GW} {GH}"))
     rpad = f"{GX} {GY - PARKT} {GW} {GH + PARKT}"
@@ -217,6 +219,9 @@ def seq_tab():
     c.append(image("ruler", "ff262626", f"{GX} {RY} {GW} {RH}"))
     for m in range(NUMS):
         c.append(xypad(f"num{m + 1}", prm(f"Num X {m + 1}"), ly, f"ssq_n{m + 1}.png", xpark_rect(GX, NUMW, RY, RH)))
+    # (drawn after the ruler, so the ruler does not cover it)
+    # 2026-11-22: "+N kept" (notes outside Steps) at the right end of the ruler (amber, as percSeq's "more")
+    c.append(value_label("v_kept", prm("Kept Text"), f"{GX + GW - 100} {RY} 96 {RH}", 22, "ffd9a64d", "right verticallyCentred"))
     # cursor, Group lines, end line, playhead (on top of the notes)
     c.append(xypad("cursor", prm("Cursor X"), ly, "ssq_cursor.png", vpad))
     for i in range(GRPLINES):
@@ -246,6 +251,11 @@ def seq_tab():
     c.append(touch("t_roll", "roll", f"{GX} {GY} {GW} {GH}"))
     c.append(touch("t_labels", "labels", f"0 {GY} {GX - 4} {GH}"))
     c.append(touch("t_free", "free", f"{FREEX} {FREEY} {FREEW} {FREEH}"))
+    # 2026-11-22: the panel's touch cells, on top of the touch guard
+    for b, (title, names) in enumerate(BANKS):
+        for k, nm in enumerate(names):
+            c.append(lists.seq_cell(f"q{b}_{k}_v", P[nm], f"{PANELX + b * QCOLW} {RY + 32 + k * 110} {QCOLW} 76",
+                                    drag=nm not in NO_DRAG))
     root = {"version": 2, "actions": [],
             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": BG, "image": ""},
                                "unfocussed": {"version": 1, "colour": BG, "image": ""}},
@@ -528,7 +538,7 @@ def main():
                     fields += lists.text_button(f"t{P[name]}", P[name], label, k)
             skin_ui.add_to_tab(t, fields + panels)
             t["qlinkBoundsData"] = qlink_bounds(slots)
-        tabs.insert(0, seq_tab())
+        tabs.insert(0, seq_tab(lists))
         n_tabs = len(tabs)
         for i, (nm, first, cnt) in enumerate(MASKS):
             tabs.append(mask_tab(nm, n_tabs + i, first, cnt))

@@ -390,6 +390,14 @@ int main()
     CHECK(p.testDispStep(0) == 1, "row 1 at step 2 at ppq 0.3: %d", p.testDispStep(0));
     CHECK(p.testComputed(kCellX0 + 1) > 0.0f, "row 1 step square shown (16-step size)");
     CHECK(p.testComputed(kCellX0 + 0) == 0.0f && p.testComputed(kCellX0 + 2) == 0.0f, "the other sizes are parked");
+    {   // 2026-11-22: the LANE page shows the VEL lane's playhead (the selected row's step)
+        const int oldRow = p.testSelRow();
+        p.set(kSelRow, 1); p.set(kLaneSel, 0);
+        play(p, 0.3, 0.35);
+        CHECK(p.testComputed(kLnPlayX0 + 1) > 0.0f, "VEL lane playhead shown");
+        CHECK(std::fabs(p.testComputed(kLnPlayX0 + 1) - p.testComputed(kCellX0 + 1)) < 1e-6f, "at the row's step");
+        p.set(kSelRow, oldRow + 1); block(p, {}, 0.35);
+    }
     stop(p);
 
     // ---- 1.1: row off: silent, no step square; on again: starts at its Range Start at the next bar
@@ -746,6 +754,79 @@ int main()
         CHECK(cc == 0, "SEND sends nothing while the CC is off (%d)", cc);
     }
 
+    // ---- 2026-11-22: a Range End at the last step follows Steps; one inside stays
+    {
+        PercSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(kFr); u.internalResume();
+        waitWorker(); block(u, {});
+        Row& w = u.testModel().seqs[0].rows[0];
+        u.set(kRSteps, 16); block(u, {});
+        CHECK(w.rEnd == 15, "Range End at 16: %d", w.rEnd + 1);
+        u.set(kRSteps, 1); block(u, {});
+        CHECK(w.rEnd == 0, "Steps 1 clips Range End: %d", w.rEnd + 1);
+        u.set(kRSteps, 16); block(u, {});
+        CHECK(w.rEnd == 15, "Range End follows Steps back to 16: %d", w.rEnd + 1);
+        u.set(kREnd, 8); block(u, {});
+        u.set(kRSteps, 32); block(u, {});
+        CHECK(w.rEnd == 7, "Range End inside the steps stays at 8: %d", w.rEnd + 1);
+        u.set(kRSteps, 4); block(u, {});
+        CHECK(w.rEnd == 3, "Steps below Range End clips it: %d", w.rEnd + 1);
+    }
+    // ---- 2026-11-22: hits outside Steps are kept (not deleted); a cut hit gets its full length back
+    {
+        PercSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(kFr); u.internalResume();
+        waitWorker(); block(u, {});
+        u.set(kSelRow, 1); block(u, {});
+        Row& w = u.testModel().seqs[0].rows[0];
+        auto setup = [&]() { w = Row(); w.note = 36; addHit(u, 0, 0, 1); addHit(u, 0, 3, 4); addHit(u, 0, 10, 1); };
+        auto steps = [&](int n) { u.set(kRSteps, (float)n); block(u, {}); };
+        setup(); steps(16);
+        steps(4);
+        CHECK(w.count == 2 && near(w.hits[1].len, 1) && w.keptOutside() == 1, "Steps 4: 2 shown (one cut), 1 kept: %d %d", w.count, w.keptOutside());
+        steps(1);
+        CHECK(w.count == 1 && w.keptOutside() == 2, "Steps 1: 1 shown, 2 kept: %d %d", w.count, w.keptOutside());
+        steps(16);
+        CHECK(w.count == 3 && near(w.hits[1].st, 3) && near(w.hits[1].len, 4) && near(w.hits[2].st, 10) && w.kept == 0,
+              "Steps back to 16: all 3 hits, the cut one at full length (%d, len %f)", w.count, w.count > 1 ? w.hits[1].len : -1.0f);
+        // an edit of the cut hit counts: VEL edit, then Steps up -> it stays cut
+        steps(4); w.hits[1].v = 0.5f; steps(16);
+        CHECK(w.count == 3 && near(w.hits[1].len, 1), "VEL edit of a cut hit: its length stays cut: %f", w.hits[1].len);
+        setup(); steps(16); steps(4); w.hits[1].len = 0.5f; steps(16);
+        CHECK(near(w.hits[1].len, 0.5f), "length edit of a cut hit stays: %f", w.hits[1].len);
+        // delete the cut hit, save, load: it stays gone; kept hits survive save/load while Steps is short
+        setup(); steps(16); steps(4); w.remove(1);
+        u.testSaveAll(); block(u, {});
+        std::vector<uint8_t> out;
+        u.saveExtraState(out);
+        PercSeq q;
+        q.internalSetSampleRate(48000); q.internalSetBlockSize(kFr); q.internalResume();
+        q.loadExtraState(out.data(), out.size()); q.internalResume(); block(q, {});
+        const Row& l = q.testModel().seqs[0].rows[0];
+        CHECK(l.steps == 4 && l.count == 1 && l.keptOutside() == 1, "load with Steps 4: 1 shown, 1 kept: %d %d", l.count, l.keptOutside());
+        q.set(kSelRow, 1); block(q, {}); q.set(kRSteps, 16); block(q, {});
+        CHECK(l.count == 2 && near(l.hits[1].st, 10), "after the load, Steps 16 brings the kept hit back; the deleted one stays gone: %d", l.count);
+        // a full row (64 with the kept hits) takes no new hit
+        Row f;
+        for (int i = 0; i < kMaxHits; ++i) { Hit h; h.st = i * 0.5f; h.len = 0.25f; f.insert(h); }
+        f.steps = 32; f.setSteps(8, u.testScratch());
+        CHECK(f.full() && f.insert(Hit()) == -1 && f.count + f.kept == kMaxHits, "kept hits count toward the 64");
+        // PASTE takes the kept hits along; CLEAR removes them
+        setup(); steps(16); steps(4);
+        auto tap = [&](PercSeq& x, int i) { x.set(i, 1 - x.get(i)); block(x, {}); block(x, {}); };
+        tap(u, kSeqCopy);
+        u.set(kSequence, 2); block(u, {}); block(u, {});
+        tap(u, kSeqPaste); tap(u, kSeqPaste);
+        Row& pr = u.testModel().seqs[1].rows[0];
+        CHECK(pr.count == 2 && pr.keptOutside() == 1, "PASTE: kept hits too: %d %d", pr.count, pr.keptOutside());
+        tap(u, kSeqClear); tap(u, kSeqClear);
+        CHECK(pr.count == 0 && pr.kept == 0, "CLEAR: kept hits too");
+        // CC lane values survive Lane Steps 16 -> 1 -> 16
+        u.set(kSequence, 1); block(u, {}); block(u, {});
+        w.lane[0].val[9] = 99;
+        u.set(kLaneSel, 1); block(u, {}); u.set(kLnSteps, 1); block(u, {}); u.set(kLnSteps, 16); block(u, {});
+        CHECK(w.lane[0].val[9] == 99 && w.lane[0].steps == 16, "CC lane values survive Lane Steps 16 -> 1 -> 16");
+    }
     std::printf(g_fail ? "%d FAILED\n" : "all plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

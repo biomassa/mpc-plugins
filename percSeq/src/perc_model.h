@@ -15,6 +15,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "../../common/kept_hits.h"
+
 namespace perc {
 
 constexpr int kRows = 16;
@@ -202,6 +204,7 @@ struct Row
     uint8_t lockCC[4] = {0, 0, 0, 0};            // 1.3: CC numbers of the locks (0 = off)
     CcLane lane[kCcLanes];                       // 1.3
     int count = 0;
+    int kept = 0;                // 2026-11-22: kept hits after the active ones (common/kept_hits.h)
     Hit hits[kMaxHits];
 
     int hitAt(float pos) const
@@ -238,31 +241,40 @@ struct Row
     void remove(int i)
     {
         if (i < 0 || i >= count) return;
-        for (int k = i; k < count - 1; ++k) hits[k] = hits[k + 1];
+        for (int k = i; k < count + kept - 1; ++k) hits[k] = hits[k + 1];   // the kept hits move down too
         --count;
     }
+    bool full() const { return count + kept >= kMaxHits; }   // kept hits count toward the 64
     // insert, keeping the order; returns the new index or -1
     int insert(const Hit& h)
     {
-        if (count >= kMaxHits) return -1;
+        if (full()) return -1;
+        for (int k = count + kept; k > count; --k) hits[k] = hits[k - 1];   // make room: the kept hits move up
         int i = count;
         while (i > 0 && hits[i - 1].st > h.st) { hits[i] = hits[i - 1]; --i; }
         hits[i] = h;
         ++count;
         return i;
     }
-    void fitToSteps()
+    // 2026-11-22: hits outside Steps are kept (common/kept_hits.h), not deleted
+    static bool sameButLen(const Hit& a, const Hit& b)
     {
-        int w = 0;
-        for (int i = 0; i < count; ++i)
-        {
-            Hit h = hits[i];
-            if (h.st >= steps - kEps) continue;
-            if (h.st + h.len > steps) h.len = steps - h.st;
-            if (h.len < kMinLen) continue;
-            hits[w++] = h;
-        }
-        count = w;
+        if (a.v != b.v || a.d != b.d || a.r != b.r || a.fd != b.fd || a.nd != b.nd) return false;
+        for (int l = 0; l < kLanes; ++l)
+            if (a.ch[l].op != b.ch[l].op || a.ch[l].ptn != b.ch[l].ptn || a.ch[l].amt != b.ch[l].amt
+                || a.ch[l].prob != b.ch[l].prob) return false;
+        for (int k = 0; k < 4; ++k) if (a.lock[k] != b.lock[k]) return false;
+        return true;
+    }
+    // all hits at full length (sorted) into out[kMaxHits]; returns how many
+    int logical(Hit* out) const { return keephits::logical(hits, count, kept, steps, kMinLen, kEps, sameButLen, out); }
+    // hits from a logical list for the current Steps
+    void fromList(const Hit* list, int n) { keephits::split(list, n, steps, kMinLen, kMaxHits, hits, count, kept); fitRange(); }
+    // a new Steps: the hits outside it are kept; scratch: kMaxHits hits
+    void setSteps(int n, Hit* scratch) { const int L = logical(scratch); steps = n; fromList(scratch, L); }
+    int keptOutside() const { return keephits::outside(hits, count, kept, steps, kMinLen); }
+    void fitRange()
+    {
         rEnd = std::min(rEnd, steps - 1);
         rStart = std::min(rStart, rEnd);
     }

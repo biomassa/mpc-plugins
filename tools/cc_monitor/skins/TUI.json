@@ -1,0 +1,415 @@
+{
+ "pageData": {
+  "version": 1,
+  "componentDefinitions": {
+   "version": 2,
+   "importFiles": [],
+   "localComponentDefinitions": []
+  },
+  "replacementStrings": [],
+  "info": {
+   "version": 1,
+   "type": "CompleteDescription"
+  },
+  "tabs": [
+   {
+    "version": 1,
+    "tabName": "MON",
+    "fnKeyIndex": 0,
+    "fnKeySubIndex": 0,
+    "componentDefinition": {
+     "version": 2,
+     "actions": [],
+     "backgroundData": {
+      "version": 1,
+      "focussed": {
+       "version": 1,
+       "colour": "ff1e1d1e",
+       "image": ""
+      },
+      "unfocussed": {
+       "version": 1,
+       "colour": "ff1e1d1e",
+       "image": ""
+      }
+     },
+     "ignoreMousePresses": false,
+     "disableCoarseDataWheel": false,
+     "componentsData": [
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "n1",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "Regular",
+           "height": 28.0
+          },
+          "colour": "ffe8e6df",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Name",
+         "handleName": "WithName[CC NUM]/Parameter 1"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "23 45 278 40"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "v1",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "SemiBold",
+           "height": 60.0
+          },
+          "colour": "ffffffff",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Value",
+         "handleName": "Parameter 1"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "23 89 278 80"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "n2",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "Regular",
+           "height": 28.0
+          },
+          "colour": "ffe8e6df",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Name",
+         "handleName": "WithName[CC VALUE]/Parameter 2"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "343 45 278 40"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "v2",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "SemiBold",
+           "height": 60.0
+          },
+          "colour": "ffffffff",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Value",
+         "handleName": "Parameter 2"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "343 89 278 80"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "n3",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "Regular",
+           "height": 28.0
+          },
+          "colour": "ffe8e6df",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Name",
+         "handleName": "WithName[CHANNEL]/Parameter 3"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "663 45 278 40"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "v3",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "SemiBold",
+           "height": 60.0
+          },
+          "colour": "ffffffff",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Value",
+         "handleName": "Parameter 3"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "663 89 278 80"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "n4",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "Regular",
+           "height": 28.0
+          },
+          "colour": "ffe8e6df",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Name",
+         "handleName": "WithName[COUNT]/Parameter 4"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "983 45 278 40"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "v4",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "SemiBold",
+           "height": 60.0
+          },
+          "colour": "ffffffff",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Value",
+         "handleName": "Parameter 4"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "983 89 278 80"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "n5",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "Regular",
+           "height": 28.0
+          },
+          "colour": "ffe8e6df",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Name",
+         "handleName": "WithName[LAST NOTE]/Parameter 5"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "23 245 598 40"
+       }
+      },
+      {
+       "version": 2,
+       "componentData": {
+        "version": 1,
+        "name": "v5",
+        "type": "Label",
+        "data": {
+         "version": 1,
+         "textStyle": {
+          "version": 1,
+          "font": {
+           "version": 1,
+           "name": "Titillium Web",
+           "style": "SemiBold",
+           "height": 60.0
+          },
+          "colour": "ffffffff",
+          "justification": "left verticallyCentred",
+          "case": "Original"
+         },
+         "type": "Value",
+         "handleName": "Parameter 5"
+        }
+       },
+       "handle remapping": {
+        "version": 1,
+        "map": []
+       },
+       "bounds": {
+        "version": 1,
+        "acceptsHWFocus": "No",
+        "showWhenDataModelInvalid": "Show",
+        "whenVisible": "Always",
+        "boundsType": "Absolute",
+        "bounds": "23 289 598 80"
+       }
+      }
+     ]
+    },
+    "qlinkBoundsData": []
+   }
+  ]
+ }
+}

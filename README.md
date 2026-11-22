@@ -9,9 +9,29 @@ Plugins for Akai MPC standalone hardware, made with the official [MPC Plugin SDK
 | Plugin | Type | Description |
 |---|---|---|
 | [Scala Retuner](Scala%20Retuner/) | Instrument (silent) | Retunes the notes of its track to a Scala scale. Keygroup and OPx-4 tracks play the retuned notes. |
-| [scalaSeq](scalaSeq/) | Instrument (silent) | A monophonic pitch and gate sequencer for Scala tunings, with lanes and chance operations. It plays MIDI on keygroup and OPx-4 tracks. |
+| [scalaSeq](scalaSeq/) | Instrument (silent) | A monophonic pitch and gate sequencer for Scala tunings, with lanes, chance operations, locks and CC lanes. It plays MIDI on keygroup and OPx-4 tracks. |
+| [percSeq](percSeq/) | Instrument (silent) | A 16-row step sequencer for drum tracks and chopped samples. Each row has its own playhead, rate and length. Chance operations with a sound pool, FLAM, sample reverse, locks and CC lanes. It plays MIDI on a drum track. |
 
-Each plugin folder has a README, a CHANGELOG and a list of known issues. Code that more than one plugin uses is in `common/`.
+Each plugin folder has:
+
+- `docs.md`: the user guide (features and basic use).
+- `README.md`: the details (parameters, setup, build and test).
+- `CHANGELOG.md` and `knownIssues.md`.
+
+The plugins send their MIDI through their own ALSA port, for example "percSeq MIDI Out". This is not part of the official SDK host contract.
+
+Code that more than one plugin uses is in `common/`.
+
+## Tools
+
+Test tools for the MPC. They are not for music.
+
+| Tool | Description |
+|---|---|
+| [tools/cc_monitor](tools/cc_monitor/) | CC Monitor, a silent plugin. It shows the last CC, a CC count and the last note that the MPC gives to a plugin on its track. |
+| `tools/midi_probe` | A program that logs each event of an ALSA port with its time. |
+| `tools/midi_send` | A program that sends a CC and a note through an ALSA port at a fixed interval. |
+| `touchProbe` | A silent plugin that measures touch on the MPC screen. |
 
 ## Requirements
 
@@ -45,7 +65,7 @@ This repository is the `plugins/` folder of an SDK clone. The SDK ignores this f
    python3 tools/build.py "plugins/Scala Retuner"
    ```
 
-The output is in `plugins/<Name>/build/blackdingus - VST - <Name>/`. Copy this folder into a `VST2 Plugins` folder on the MPC, then restart the MPC.
+The output is in `plugins/<Name>/build/blackdingus - VST - <Name>/`. Copy this folder into a `VST2 Plugins` folder on the internal storage of the MPC, then restart the MPC. On the MPC One G2 the SD card cannot load plugins (it is mounted `noexec`).
 
 ## License
 

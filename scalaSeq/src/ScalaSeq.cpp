@@ -106,7 +106,9 @@ enum ParamIndex
     kSeqCopy = kLnBarY0 + kMaxSteps, kSeqPaste, kSeqClear,
     // 2.8: SEND buttons (one CC at value 64 for MIDI Learn): Lock CC 1-4, the shown lane
     kSend0, kNumSends = 5,
-    kNumParams = kSend0 + kNumSends
+    // 2026-11-22: "+N kept" (notes outside Steps), at the right end of the ruler
+    kKeptText = kSend0 + kNumSends,
+    kNumParams = kKeptText + 1
 };
 constexpr int kFirstEdit = kSteps, kLastEdit = kSequence;
 // 2.5: MIDI notes 60-91 on this track select sequences 1-32 (fixed). The 16 pad rows (Pad 1 Note
@@ -312,6 +314,7 @@ public:
             addParam(mpc::boolParam  ("seqclear",  "Clear Seq",  false));
             for (int k = 0; k < 4; ++k) addParam(mpc::boolParam(nm("sendlock", k).c_str(), nm("Send Lock ", k).c_str(), false));
             addParam(mpc::boolParam  ("sendlane",  "Send Lane",  false));
+            addParam(mpc::floatParam ("kepttext",  "Kept Text",  0, 1, 0, "", 4));
         }
 
         if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
@@ -529,6 +532,10 @@ public:
             const float g = (st - (float)viewStart_) / zoom();
             setDisp(kLnPlayX, (st >= 0 && g >= 0 && g < 1) ? padPos(g * kGW, 2, kGW + kPARK) : 1.0f);
         }
+        {   // 2026-11-22: "+N kept" of the edited sequence
+            const int k = ed().keptOutside();
+            if (tKept_.exchange(k) != k) textNotify(kKeptText);
+        }
         if (notifyPending_) sent = true;
         // copy for project saving: the edited sequence only (a full copy after a load)
         if ((savedDirty_ || savedAll_) && savedMutex_.try_lock())
@@ -595,6 +602,7 @@ public:
                 return true;
             }
             case kDegText: out = tSel_.load() == 0 ? std::string("-") : degTxt(tDeg_.load()); return true;
+            case kKeptText: if (tKept_.load() > 0) { std::snprintf(b, sizeof b, "+%d kept", tKept_.load()); out = b; } else out = ""; return true;
             case kViewText: std::snprintf(b, sizeof b, "%d-%d", tView0_.load() + 1, tView0_.load() + tZoom_.load()); out = b; return true;
             case kPeriod: case kNudge: std::snprintf(b, sizeof b, v == 0 ? "0" : "%+d", v); out = b; return true;
             // 2.8
@@ -673,9 +681,11 @@ public:
                 out.insert(out.end(), {L.cc, L.steps, L.rate, L.mode, L.ratio, L.dir, L.rest, (uint8_t)L.fine});
                 out.insert(out.end(), L.val, L.val + kMaxSteps);
             }
-            put32((uint32_t)q.count);
-            const uint8_t* p = reinterpret_cast<const uint8_t*>(q.notes);
-            out.insert(out.end(), p, p + sizeof(Note) * (size_t)q.count);
+            // 2026-11-22: all notes at full length, also the kept ones (the load splits them again)
+            const int n = q.logical(saveList_);
+            put32((uint32_t)n);
+            const uint8_t* p = reinterpret_cast<const uint8_t*>(saveList_);
+            out.insert(out.end(), p, p + sizeof(Note) * (size_t)n);
         }
     }
 
@@ -734,7 +744,7 @@ public:
             q.steps = std::max(1, std::min(kMaxSteps, (int)st));
             q.rStart = (int)rs; q.rEnd = (int)re;
             std::memcpy(&q.swing, &sw, 4);
-            q.count = (int)cnt;
+            q.count = (int)cnt; q.kept = 0;
             if (v5) std::memcpy(q.notes, data + pos, sizeof(Note) * cnt);
             else
                 for (uint32_t i = 0; i < cnt; ++i)   // SSQ4 notes: no locks
@@ -748,7 +758,9 @@ public:
                 }
             for (uint32_t i = 0; i < cnt; ++i) for (int8_t& lk : q.notes[i].lock) lk = std::max<int8_t>(-1, lk);
             pos += nsz * cnt;
-            q.fitToSteps();
+            // 2026-11-22: the saved list has all notes at full length: split it (notes outside Steps are kept)
+            std::memcpy(loadList_, q.notes, sizeof(Note) * cnt);
+            q.fromList(loadList_, (int)cnt);
         }
         {
             std::lock_guard<std::mutex> l(scaleMutex_);
@@ -1259,8 +1271,14 @@ private:
                 break;
             }
             case kSteps:
-                s.steps = std::max(1, std::min(kMaxSteps, iv));
-                s.fitToSteps();
+            {
+                // 2026-11-22 (user): a Range End at the last step follows Steps (16 -> 1 -> 16 gives 16 again);
+                // a Range End inside the steps stays, and is clipped only when Steps goes below it
+                const bool endAtLast = s.rEnd >= s.steps - 1;
+                // 2026-11-22 (user): notes outside the new Steps are kept, not deleted (common/kept_hits.h)
+                s.setSteps(std::max(1, std::min(kMaxSteps, iv)), keptScratch_);
+                if (endAtLast) s.rEnd = s.steps - 1;
+            }
                 cursor_ = std::min(cursor_, (float)s.steps - snapQ());
                 viewStart_ = std::min(viewStart_, s.steps - 1);
                 echo(kRangeStart, s.rStart + 1); echo(kRangeEnd, s.rEnd + 1);
@@ -2241,6 +2259,7 @@ private:
     int stagingView_[4] = {0, 0, 0, 0};
     // value texts (written by the audio thread, read by formatValue)
     std::atomic<int> tSel_{0}, tDeg_{0}, tView0_{0}, tZoom_{16};
+    std::atomic<int> tKept_{0};   // 2026-11-22: kept notes of the edited sequence
     std::atomic<int> tChOp_[kLanes] = {}, tChProb_[kLanes] = {}, tChAmt_[kLanes] = {};
     bool clearArmed_ = false;
     bool seqArmed_[2] = {false, false}, pastePending_ = false;   // 2.8: PASTE, CLEAR armed
@@ -2251,6 +2270,8 @@ private:
     double clearArmMs_ = 0;
     float rowY_[kRows + 1] = {};
     std::atomic<bool> notify_[kNumParams];
+    // 2026-11-22: scratch lists for kept notes: Steps changes (audio thread), save and load (UI thread)
+    Note keptScratch_[kMaxNotes], saveList_[kMaxNotes], loadList_[kMaxNotes];
     bool notifyPending_ = false;
 
     Chan chans_[16];

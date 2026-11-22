@@ -4,6 +4,8 @@ scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MP
 
 > This software was developed with the assistance of a LLM.
 
+The user guide is in [docs.md](docs.md). This README has the details.
+
 ## How it works
 
 - Each note has a start and a length in steps, a scale degree, and the lanes VEL, GLIDE, RATCH, FADE and DUTY. Notes of different pitches can overlap: a note that starts later cuts the earlier note. Notes of the same pitch do not overlap: an edit stops at the neighbour.
@@ -39,7 +41,11 @@ Remove scalaSeq from its track and add it again. Otherwise the MPC can keep the 
 
 ## Make a sequence
 
-The SEQ page is a piano roll. From top to bottom: the header, the ruler (step numbers), the roll (16 rows of scale degrees, sized by cents), and the velocity lane. The Q-Link banks and the FREE button are at the right.
+The SEQ page is a piano roll. From top to bottom: the header, the ruler (step numbers) and the roll (16 rows of scale degrees, sized by cents). The velocity lane is on the LANE page (2.8.0). The Q-Link banks and the FREE button are at the right.
+
+When you make Steps smaller, the notes outside it are kept, not deleted: they come back when Steps goes up again. "+N kept" at the right end of the ruler shows how many notes of the sequence are kept.
+
+The Q-Link banks react to touch. Tap a value to select its Q-Link column. Drag up or down on a value to change it. Double-tap a value (or push Enter) to open the big knob editor. Note, Move and Length have no drag: use the Q-Link or the big knob.
 
 Touch on the roll:
 

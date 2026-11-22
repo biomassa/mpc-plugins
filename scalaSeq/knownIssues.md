@@ -123,3 +123,18 @@
 ## Port settings (2026-11-22)
 
 - Measured on the MPC One G2: with Global on for "scalaSeq MIDI Out", selecting the scalaSeq track made a MIDI loop (pads blinking, broken sound); with Control off, SEND did not reach MIDI Learn. See "The port settings on the MPC" in the README. SEND with Control on is not yet confirmed.
+
+## SEQ page touch cells (Unreleased, 2026-11-22)
+
+- Not tested on the MPC. The cells have the same structure as the generated faders (a container that selects the Q-Link column at a touch, with a knob inside). On the G2 those faders select their column.
+- Measured on the G2 (user photo, 2026-11-22): a Knob of type ValueSlider draws no value text. The value is now a Label under the knob.
+- Not known: if a vertical drag on the (invisible) ValueSlider knob changes the value on the G2.
+- Not known: if a drag on a value that the plugin limits jumps. Thus Note, Move and Length have no drag.
+- Not known: if 34 px values fit the 68 px columns. Long values (for example 1/16T) can be clipped.
+
+## Kept notes (Unreleased, 2026-11-22)
+
+- Kept notes count toward the limit of 256. When the limit is reached, a new note cannot be added, and a cut note may stay cut (its full-length copy does not fit).
+- A kept note that comes back over a note you added meanwhile at the same place can overlap it. Not tested.
+- Not tested on the MPC.
+- Host simulator, seed 99: the state round trip sometimes reports the Row Line display values (2 of 26 runs; the 2.8.0 build: 0 of 26), and the re-saved chunk differs from the first (same size). The Row Lines are display positions that the plugin computes. The cause is not known: the kept notes, the Range End rule or the Kept Text parameter. To find out: run seed 99 50 times with each change switched off in turn.

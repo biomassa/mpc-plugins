@@ -7,6 +7,23 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- SEQ page: row numbers 1-16 (from the bottom) at the right of the roll, 22 px white.
+- Steps no longer deletes hits. When Steps goes down, the hits outside it are kept, and a hit that crosses the end plays cut at the end. When Steps goes up again, they come back, and a cut hit gets its full length back. An edit of a cut hit (any change, for example VEL or length) makes the edit count: it keeps its cut length. Kept hits are saved in the project, and COPY, PASTE and CLEAR include them. They count toward the limit of 64 hits per row.
+- SEQ page: the right end of the ruler shows "+N kept" (amber) when the selected row has hits outside Steps. It replaces "more" while there are kept hits. The text is now drawn after the ruler, so the ruler cannot cover it.
+- SEQ page, Q-Link panel: the 16 values react to touch. A tap selects the Q-Link column of the value (the MPC frames it). A vertical drag on the value changes it. A double-tap (or Enter) opens the big knob editor, also for lists such as Snap and Rate (the MPC's own list overlay opens empty for this plugin). Hit, Row, Move, Length and Sel Row have no drag (the plugin limits these values, and a drag could jump); a tap and a double-tap work on them.
+- SEQ page, Q-Link panel: larger text. Names 24 px (were 22), values 34 px (were 32). The names and the 4 bank titles are light grey (e8e6df; were grey).
+
+- LANE page: the current step is a thin red line (4 px) under the bars, as wide as the step. Before, it was a white 25 % column behind the bars, which the bars hid. The VEL lane now shows it too (the selected row's current step); the CC lanes show their own step.
+- POOL pads and SEQ row labels: the row number is dim grey (8a8885) and the note is white, so the two numbers are different. They were one text in one colour. New display parameters Note Text 1-16 (added at the end; the parameter count is now 1,337).
+
+### Fixed
+
+- Pop-up lists: the MPC's orange Q-Link frame was drawn over an open list. The list panels now ask the MPC to hide the frame while they are shown (hideQLinkBounds, component version 4). Seen working on the MPC One G2: the frame is hidden only while a list is open.
+- SEQ page, Q-Link panel: the values of the drag cells did not show on the MPC One G2 (the MPC's ValueSlider knob draws no text there). Each value is now a text label, with the drag knob on top of it.
+- Range End (RATE page): when Range End is at the last step, it now follows Steps. Before, Steps 16 -> 1 -> 16 left Range End at 1, and only 1 step played. A Range End inside the steps stays; it is clipped when Steps goes below it. When it is clipped to the last step, it follows Steps from then on.
+
 ## [1.3.0] - 2026-11-22
 
 ### Added

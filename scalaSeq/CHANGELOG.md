@@ -7,6 +7,19 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Changed
+
+- Steps no longer deletes notes. When Steps goes down, the notes outside it are kept, and a note that crosses the end plays cut at the end. When Steps goes up again, they come back, and a cut note gets its full length back. An edit of a cut note (any change, for example VEL or length) makes the edit count: it keeps its cut length. Kept notes are saved in the project, and COPY, PASTE and CLEAR include them. They count toward the limit of 256 notes per sequence.
+- SEQ page: the right end of the ruler shows "+N kept" (amber) when the sequence has notes outside Steps. New display parameter Kept Text (added at the end).
+- SEQ page, Q-Link panel: the 16 values react to touch. A tap selects the Q-Link column of the value (the MPC frames it). A vertical drag on the value changes it. A double-tap (or Enter) opens the big knob editor, also for lists such as Snap and Rate (the MPC's own list overlay opens empty for this plugin). Note, Move and Length have no drag (the plugin limits these values, and a drag could jump); a tap and a double-tap work on them.
+- SEQ page, Q-Link panel: larger text. Names 24 px (were 22), values 34 px (were 32). The names and the 4 bank titles are light grey (e8e6df; were grey).
+
+### Fixed
+
+- Pop-up lists: the MPC's orange Q-Link frame was drawn over an open list. The list panels now ask the MPC to hide the frame while they are shown (hideQLinkBounds, component version 4). Seen working on the MPC One G2: the frame is hidden only while a list is open.
+- SEQ page, Q-Link panel: the values of the drag cells did not show on the MPC One G2 (the MPC's ValueSlider knob draws no text there). Each value is now a text label, with the drag knob on top of it.
+- Range End (RATE page): when Range End is at the last step, it now follows Steps. Before, Steps 16 -> 1 -> 16 left Range End at 1, and only 1 step played. A Range End inside the steps stays; it is clipped when Steps goes below it. When it is clipped to the last step, it follows Steps from then on.
+
 ### Added
 
 - A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.

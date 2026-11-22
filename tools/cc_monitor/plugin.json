@@ -1,0 +1,17 @@
+{
+  "name": "CC Monitor",
+  "manufacturer": "blackdingus",
+  "version": "1.0.0",
+  "format": "vst2",
+  "kind": "instrument",
+  "uid": "BxCm",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Utility",
+  "file32": "VST/cc-monitor-arm32.so",
+  "file64": "VST/cc-monitor-arm64.so",
+  "description": "Silent test instrument: shows the last MIDI CC (number, value, channel), a CC count and the last note that the MPC delivers to a plugin on its track.",
+  "author": "blackdingus",
+  "url": "",
+  "license": "MIT"
+}

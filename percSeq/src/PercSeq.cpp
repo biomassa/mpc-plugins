@@ -100,7 +100,10 @@ enum ParamIndex
     kSeqCopy = kLnBarY0 + kMaxSteps, kSeqPaste, kSeqClear,
     // 1.3: SEND buttons (one CC at value 64 for MIDI Learn): Lock CC 1-4, the shown lane, Rev CC, CC Num
     kSend0, kNumSends = 7,
-    kNumParams = kSend0 + kNumSends
+    // 2026-11-22: each row's note alone (POOL pads and SEQ row labels show the row number and the note
+    // in two colours; "Lab N" keeps "row note" for older skins)
+    kNoteText0 = kSend0 + kNumSends,
+    kNumParams = kNoteText0 + kRows
 };
 constexpr int kFirstEdit = kGroup, kLastEdit = kCCRest;
 // MIDI notes 60-91 on this track select sequences 1-32. The 16 pad rows (Pad 1 Note .. +15) must
@@ -307,6 +310,7 @@ public:
         addParam(mpc::boolParam  ("sendlane",  "Send Lane",  false));
         addParam(mpc::boolParam  ("sendrev",   "Send Rev CC", false));
         addParam(mpc::boolParam  ("sendcc",    "Send CC Num", false));
+        for (int r = 0; r < kRows; ++r) disp(num("notetext", r), num("Note Text ", r), 0);
 
         if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
         for (auto& f : notify_) f.store(false);
@@ -531,13 +535,18 @@ public:
             for (int k = 0; k < kZoomN; ++k)
                 setDisp(kCellX0 + r * kZoomN + k, xPark(pxOfPos((float)st), kGW / (8 << k), show && k == zoomClass()));
         }
-        // 1.3: LANE: the shown CC lane's current step
+        // 1.3: LANE: the current step of the shown lane (red line under the bars)
         {
             const int ls = choiceAt(kLaneSel);
-            const int st = (playing && ls > 0) ? lnIdx_[selRow_][ls - 1] : -1;
+            // 2026-11-22 (user): VEL shows the selected row's playhead; a CC lane its own current step
+            const int st = !playing ? -1 : ls > 0 ? lnIdx_[selRow_][ls - 1] : dispStep_[selRow_];
             const bool show = st >= 0 && st >= viewStart_ && st < viewStart_ + zoom() - kEps;
             for (int k = 0; k < kZoomN; ++k)
                 setDisp(kLnPlayX0 + k, xPark(pxOfPos((float)st), kGW / (8 << k), show && k == zoomClass()));
+        }
+        {   // 2026-11-22: "+N kept" of the selected row
+            const int k = row().keptOutside();
+            if (tKept_.exchange(k) != k) textNotify(kMoreText);
         }
         if (notifyPending_) sent = true;
         // copy for project saving: the edited sequence only (a full copy after a load)
@@ -586,7 +595,10 @@ public:
                 else { std::snprintf(b, sizeof b, "%d/%d", tSel_.load(), tCount_.load()); out = b; }
                 return true;
             case kViewText: std::snprintf(b, sizeof b, "%d/%d", tView0_.load() / std::max(1, tZoom_.load()) + 1, tPages_.load()); out = b; return true;
-            case kMoreText: out = tMore_.load() ? "more" : ""; return true;
+            case kMoreText:   // 2026-11-22 (user): "+N kept" (hits outside Steps of the selected row) wins over "more"
+                if (tKept_.load() > 0) { std::snprintf(b, sizeof b, "+%d kept", tKept_.load()); out = b; }
+                else out = tMore_.load() ? "more" : "";
+                return true;
             case kNudge: std::snprintf(b, sizeof b, v == 0 ? "0" : "%+d", v); out = b; return true;
             // 1.3
             case kLock0: case kLock0 + 1: case kLock0 + 2: case kLock0 + 3:
@@ -634,6 +646,11 @@ public:
             out = b;
             return true;
         }
+        if (index >= kNoteText0 && index < kNoteText0 + kRows)
+        {
+            out = std::to_string(tRowNote_[index - kNoteText0].load());
+            return true;
+        }
         if (index >= kLane0 && index < kPool0 && (index - kLane0) % 4 == 3)
         {
             out = amountText(laneOp_[(index - kLane0) / 4].load(std::memory_order_relaxed), v);
@@ -667,9 +684,11 @@ public:
                     out.insert(out.end(), {L.cc, L.steps, L.rate, L.mode, L.ratio, L.dir, L.rest, (uint8_t)L.fine});
                     out.insert(out.end(), L.val, L.val + kMaxSteps);
                 }
-                put32((uint32_t)q.count);
-                const uint8_t* p = reinterpret_cast<const uint8_t*>(q.hits);
-                out.insert(out.end(), p, p + sizeof(Hit) * (size_t)q.count);
+                // 2026-11-22: all hits at full length, also the kept ones (the load splits them again)
+                const int n = q.logical(saveList_);
+                put32((uint32_t)n);
+                const uint8_t* p = reinterpret_cast<const uint8_t*>(saveList_);
+                out.insert(out.end(), p, p + sizeof(Hit) * (size_t)n);
             }
     }
 
@@ -730,7 +749,7 @@ public:
                 q.note = std::max(0, std::min(127, (int)note)); q.vel = std::max(0.0f, std::min(100.0f, vel));
                 q.revCC = std::max(0, std::min(127, (int)rc)); q.ccNum = std::max(0, std::min(127, (int)cn));
                 q.ccRest = std::max(0, std::min(127, (int)cr));
-                q.count = (int)cnt;
+                q.count = (int)cnt; q.kept = 0;
                 if (v3) std::memcpy(q.hits, data + pos, sizeof(Hit) * cnt);
                 else
                     for (uint32_t i = 0; i < cnt; ++i)   // PSQ1/PSQ2 hits: no locks
@@ -745,7 +764,9 @@ public:
                 for (uint32_t i = 0; i < cnt; ++i)
                     for (int8_t& lk : q.hits[i].lock) lk = std::max<int8_t>(-1, lk);
                 pos += hsz * cnt;
-                q.fitToSteps();
+                // 2026-11-22: the saved list has all hits at full length: split it (hits outside Steps are kept)
+                std::memcpy(loadList_, q.hits, sizeof(Hit) * cnt);
+                q.fromList(loadList_, (int)cnt);
             }
         for (int k = 0; k < 4; ++k) stagingView_[k] = view[k];
         stagingReady_.store(true);
@@ -1250,7 +1271,7 @@ private:
             if (ch || selCh) textNotify(kChanceText0 + l);
         }
         if (put(tView0_, viewStart_) | put(tZoom_, (int)zoom()) | put(tPages_, pages())) textNotify(kViewText);
-        for (int r = 0; r < kRows; ++r) if (put(tRowNote_[r], ed().rows[r].note)) textNotify(kLabText0 + r);
+        for (int r = 0; r < kRows; ++r) if (put(tRowNote_[r], ed().rows[r].note)) { textNotify(kLabText0 + r); textNotify(kNoteText0 + r); }
     }
 
     void setRT(int i, float norm)
@@ -1501,7 +1522,7 @@ private:
         Row& to = rowOf(r);
         if (st >= to.steps - kEps) return false;
         const float len = std::min(h->len, to.steps - st);
-        if (len < kMinLen || !to.fits(st, len, -1) || to.count >= kMaxHits) return false;
+        if (len < kMinLen || !to.fits(st, len, -1) || to.full()) return false;   // kept hits count too
         Hit moved = *h;
         moved.st = st; moved.len = len;
         row().remove(sel_);
@@ -1535,8 +1556,14 @@ private:
             case kCCNum: s.ccNum = std::max(0, std::min(127, iv)); savedDirty_ = true; break;
             case kCCRest: s.ccRest = std::max(0, std::min(127, iv)); savedDirty_ = true; break;
             case kRSteps:
-                s.steps = std::max(1, std::min(kMaxSteps, iv));
-                s.fitToSteps();
+            {
+                // 2026-11-22 (user): a Range End at the last step follows Steps (16 -> 1 -> 16 gives 16 again);
+                // a Range End inside the steps stays, and is clipped only when Steps goes below it
+                const bool endAtLast = s.rEnd >= s.steps - 1;
+                // 2026-11-22 (user): hits outside the new Steps are kept, not deleted (common/kept_hits.h)
+                s.setSteps(std::max(1, std::min(kMaxSteps, iv)), keptScratch_);
+                if (endAtLast) s.rEnd = s.steps - 1;
+            }
                 sel_ = std::min(sel_, s.count - 1);
                 echo(kRStart, s.rStart + 1); echo(kREnd, s.rEnd + 1);
                 markRow(selRow_); echoHit();
@@ -2309,6 +2336,7 @@ private:
     int stagingView_[4] = {0, 0, 0, 0};
     std::atomic<int> tSel_{0}, tCount_{0}, tView0_{0}, tZoom_{16}, tPages_{1};
     std::atomic<bool> tMore_{false};
+    std::atomic<int> tKept_{0};   // 2026-11-22: kept hits of the selected row
     std::atomic<int> tChOp_[kLanes] = {}, tChProb_[kLanes] = {}, tChAmt_[kLanes] = {};
     std::atomic<int> tRowNote_[kRows] = {};
     bool clearArmed_ = false;
@@ -2318,6 +2346,8 @@ private:
     double burstMs_ = 0;
     double clearArmMs_ = 0;
     std::atomic<bool> notify_[kNumParams];
+    // 2026-11-22: scratch lists for kept hits: Steps changes (audio thread), save and load (UI thread)
+    Hit keptScratch_[kMaxHits], saveList_[kMaxHits], loadList_[kMaxHits];
     bool notifyPending_ = false;
 
     int keyNote_[128];
@@ -2359,6 +2389,7 @@ public:
     Model& testModel() { return *model_; }
     int testSel() const { return sel_; }
     int testSelRow() const { return selRow_; }
+    Hit* testScratch() { return keptScratch_; }
     float testCursor() const { return cursor_; }
     int testViewStart() const { return viewStart_; }
     int testEdSeq() const { return edSeq_; }

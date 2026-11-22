@@ -65,3 +65,19 @@
 ## Port settings (2026-11-22)
 
 - Measured on the MPC One G2: with Global on for "percSeq MIDI Out", selecting the percSeq track made a MIDI loop (pads blinking, broken sound); with Control off, SEND did not reach MIDI Learn. See "The port settings on the MPC" in the README. SEND with Control on is not yet confirmed.
+
+## SEQ page touch cells (Unreleased, 2026-11-22)
+
+- Not tested on the MPC. The cells have the same structure as the generated faders (a container that selects the Q-Link column at a touch, with a knob inside). On the G2 those faders select their column.
+- Measured on the G2 (user photo, 2026-11-22): a Knob of type ValueSlider draws no value text. The value is now a Label under the knob.
+- Not known: if a vertical drag on the (invisible) ValueSlider knob changes the value on the G2.
+- Not known: if a drag on a value that the plugin limits jumps. Thus Hit, Row, Move, Length and Sel Row have no drag.
+- Not known: if 34 px values fit the 68 px columns. Long values (for example 1/16T) can be clipped.
+- Not known: if the row number and the note (two labels side by side) fit on the SEQ row labels at the left of the roll (30 px for the note). Measure on the MPC.
+
+## Kept hits (Unreleased, 2026-11-22)
+
+- Kept hits count toward the limit of 64. When the limit is reached, a new hit cannot be added, and a cut hit may stay cut (its full-length copy does not fit).
+- A kept hit that comes back over a hit you added meanwhile at the same place can overlap it. Not tested.
+- Not tested on the MPC.
+- "+N kept" uses the 66 px "more" label: "+10 kept" and longer can be clipped. Not measured.

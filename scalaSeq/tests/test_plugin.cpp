@@ -705,6 +705,61 @@ int main()
         CHECK(cc == 0, "SEND sends nothing while the CC is off (%d)", cc);
     }
 
+    // ---- 2026-11-22: a Range End at the last step follows Steps; one inside stays
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        Sequence& q = u.testModel().seqs[0];
+        u.set(kSteps, 16); block(u, {});
+        CHECK(q.rEnd == 15, "Range End at 16: %d", q.rEnd + 1);
+        u.set(kSteps, 1); block(u, {});
+        CHECK(q.rEnd == 0, "Steps 1 clips Range End: %d", q.rEnd + 1);
+        u.set(kSteps, 16); block(u, {});
+        CHECK(q.rEnd == 15, "Range End follows Steps back to 16: %d", q.rEnd + 1);
+        u.set(kRangeEnd, 8); block(u, {});
+        u.set(kSteps, 32); block(u, {});
+        CHECK(q.rEnd == 7, "Range End inside the steps stays at 8: %d", q.rEnd + 1);
+        u.set(kSteps, 4); block(u, {});
+        CHECK(q.rEnd == 3, "Steps below Range End clips it: %d", q.rEnd + 1);
+    }
+    // ---- 2026-11-22: notes outside Steps are kept (not deleted); a cut note gets its full length back
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        Sequence& q = u.testModel().seqs[0];
+        auto nearf = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+        auto add = [&](float st, float len, int pitch) { Note n; n.st = st; n.len = len; n.pitch = (int16_t)pitch; q.insert(n); };
+        auto setup = [&]() { q.count = 0; q.kept = 0; add(0, 1, 60); add(3, 4, 61); add(3, 1, 62); add(10, 1, 60); };
+        auto steps = [&](int n) { u.set(kSteps, (float)n); block(u, {}); };
+        setup(); steps(16);
+        steps(4);
+        CHECK(q.count == 3 && q.keptOutside() == 1, "Steps 4: 3 shown, 1 kept: %d %d", q.count, q.keptOutside());
+        steps(1);
+        CHECK(q.count == 1 && q.keptOutside() == 3, "Steps 1: 1 shown, 3 kept: %d %d", q.count, q.keptOutside());
+        steps(16);
+        int i61 = -1;
+        for (int i = 0; i < q.count; ++i) if (q.notes[i].pitch == 61) i61 = i;
+        CHECK(q.count == 4 && i61 >= 0 && nearf(q.notes[i61].len, 4) && q.kept == 0, "Steps back to 16: all 4 notes, the cut one at full length");
+        steps(4);
+        for (int i = 0; i < q.count; ++i) if (q.notes[i].pitch == 61) q.notes[i].v = 0.5f;   // edit the cut note
+        steps(16);
+        for (int i = 0; i < q.count; ++i) if (q.notes[i].pitch == 61) CHECK(nearf(q.notes[i].len, 1), "an edit of a cut note: it stays cut");
+        // save / load while Steps is short keeps them
+        setup(); steps(16); steps(2);
+        u.testSaveAll(); block(u, {});
+        std::vector<uint8_t> out;
+        u.saveExtraState(out);
+        ScalaSeq w;
+        w.internalSetSampleRate(48000); w.internalSetBlockSize(64); w.internalResume();
+        w.loadExtraState(out.data(), out.size()); w.internalResume(); block(w, {});
+        const Sequence& l = w.testModel().seqs[0];
+        CHECK(l.steps == 2 && l.count == 1 && l.keptOutside() == 3, "load with Steps 2: 1 shown, 3 kept: %d %d", l.count, l.keptOutside());
+        w.set(kSteps, 2); block(w, {});   // the host restores the Steps parameter with the project
+        w.set(kSteps, 16); block(w, {});
+        CHECK(l.count == 4, "after the load, Steps 16 brings them back: %d", l.count);
+    }
     std::printf(g_fail ? "%d FAILED\n" : "plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

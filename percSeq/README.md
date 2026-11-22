@@ -4,6 +4,8 @@ percSeq is a 16-row hit sequencer for MPC drum tracks and chopped samples, for A
 
 > This software was developed with the assistance of a LLM.
 
+The user guide is in [docs.md](docs.md). This README has the details.
+
 ## How it works
 
 - A sequence has 16 rows. Each row is one sound: one MIDI note (a pad of a drum track, or a chop slice). Row 1 is at the bottom.
@@ -35,7 +37,13 @@ Remove percSeq from its track and add it again. Otherwise the MPC can keep the Q
 
 ## Make a sequence
 
-The SEQ page is a roll of 16 rows. From top to bottom: the header, the ruler (step numbers), the roll, and the velocity lane. The labels at the left show the row number and its note ("1 36"). The Q-Link banks and the FREE button are at the right.
+The SEQ page is a roll of 16 rows. From top to bottom: the header, the ruler (step numbers) and the roll. The velocity lane is on the LANE page (1.3.0). The labels at the left show the row number (grey) and its note (white), for example "1 36". The row numbers show again at the right of the roll. The Q-Link banks and the FREE button are at the right.
+
+On the LANE page, a thin red line under the bars shows the current step: of the selected row for VEL, of the lane for CC 1 and CC 2.
+
+When you make Steps smaller, the hits outside it are kept, not deleted: they come back when Steps goes up again. "+N kept" at the right end of the ruler shows how many hits of the selected row are kept.
+
+The Q-Link banks react to touch. Tap a value to select its Q-Link column. Drag up or down on a value to change it. Double-tap a value (or push Enter) to open the big knob editor. Hit, Row, Move, Length and Sel Row have no drag: use the Q-Link or the big knob.
 
 Each row is drawn in its own steps: step 3 of a 1/16 row and step 3 of a 1/8T row are in the same column. The current step of each row shows as a light square behind the hits (its playhead). Each row has an end bar (grey) at its Steps.
 

@@ -17,6 +17,7 @@
 #include <cstring>
 
 #include "../../common/scala.h"
+#include "../../common/kept_hits.h"
 
 namespace seq {
 
@@ -170,6 +171,7 @@ struct Sequence
     uint8_t lockCC[4] = {0, 0, 0, 0};            // 2.8: CC numbers of the locks (0 = off)
     CcLane lane[kCcLanes];                       // 2.8
     int count = 0;
+    int kept = 0;                // 2026-11-22: kept notes after the active ones (common/kept_hits.h)
     Note notes[kMaxNotes];
 
     void sort() { std::sort(notes, notes + count, [](const Note& a, const Note& b) { return a.st < b.st; }); }
@@ -225,31 +227,40 @@ struct Sequence
     void remove(int i)
     {
         if (i < 0 || i >= count) return;
-        for (int k = i; k < count - 1; ++k) notes[k] = notes[k + 1];
+        for (int k = i; k < count + kept - 1; ++k) notes[k] = notes[k + 1];   // the kept notes move down too
         --count;
     }
+    bool full() const { return count + kept >= kMaxNotes; }   // kept notes count toward the 256
     // insert, keeping the order; returns the new index or -1
     int insert(const Note& n)
     {
-        if (count >= kMaxNotes) return -1;
+        if (full()) return -1;
+        for (int k = count + kept; k > count; --k) notes[k] = notes[k - 1];   // make room: the kept notes move up
         int i = count;
         while (i > 0 && notes[i - 1].st > n.st) { notes[i] = notes[i - 1]; --i; }
         notes[i] = n;
         ++count;
         return i;
     }
-    void fitToSteps()
+    // 2026-11-22: notes outside Steps are kept (common/kept_hits.h), not deleted
+    static bool sameButLen(const Note& a, const Note& b)
     {
-        int w = 0;
-        for (int i = 0; i < count; ++i)
-        {
-            Note n = notes[i];
-            if (n.st >= steps - kEps) continue;
-            if (n.st + n.len > steps) n.len = steps - n.st;
-            if (n.len < kMinLen) continue;
-            notes[w++] = n;
-        }
-        count = w;
+        if (a.pitch != b.pitch || a.r != b.r || a.fd != b.fd || a.v != b.v || a.gl != b.gl || a.d != b.d) return false;
+        for (int l = 0; l < kLanes; ++l)
+            if (a.ch[l].op != b.ch[l].op || a.ch[l].ptn != b.ch[l].ptn || a.ch[l].amt != b.ch[l].amt
+                || a.ch[l].prob != b.ch[l].prob) return false;
+        for (int k = 0; k < 4; ++k) if (a.lock[k] != b.lock[k]) return false;
+        return true;
+    }
+    // all notes at full length (sorted) into out[kMaxNotes]; returns how many
+    int logical(Note* out) const { return keephits::logical(notes, count, kept, steps, kMinLen, kEps, sameButLen, out); }
+    // notes from a logical list for the current Steps
+    void fromList(const Note* list, int n) { keephits::split(list, n, steps, kMinLen, kMaxNotes, notes, count, kept); fitRange(); }
+    // a new Steps: the notes outside it are kept; scratch: kMaxNotes notes
+    void setSteps(int n, Note* scratch) { const int L = logical(scratch); steps = n; fromList(scratch, L); }
+    int keptOutside() const { return keephits::outside(notes, count, kept, steps, kMinLen); }
+    void fitRange()
+    {
         rEnd = std::min(rEnd, steps - 1);
         rStart = std::min(rStart, rEnd);
     }
