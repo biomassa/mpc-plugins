@@ -2,7 +2,7 @@
 
 percSeq is a step sequencer for drum tracks and chopped samples on Akai MPC standalone hardware. It has 16 rows. Each row plays one MIDI note. percSeq makes no sound. It sends its notes to other tracks through its own MIDI port, "percSeq MIDI Out".
 
-For the parameter tables and the technical details, see the [README](README.md). For the problems that we know, see [knownIssues.md](knownIssues.md).
+For the parameter tables and the technical details, see the [README](percSeq/README.md). For the problems that we know, see [knownIssues.md](percSeq/knownIssues.md).
 
 ## Features
 

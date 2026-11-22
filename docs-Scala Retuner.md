@@ -2,7 +2,7 @@
 
 Scala Retuner retunes the notes that you play to a Scala scale on Akai MPC standalone hardware. It makes no sound. It sends each note through its own MIDI port, "Scala Retuner MIDI Out", as the nearest 12-TET note plus a pitch bend. Keygroup and OPx-4 tracks that receive from this port play the notes in tune.
 
-For the parameter table and the technical details, see the [README](README.md). For the problems that we know, see [knownIssues.md](knownIssues.md).
+For the parameter table and the technical details, see the [README](Scala%20Retuner/README.md). For the problems that we know, see [knownIssues.md](Scala%20Retuner/knownIssues.md).
 
 ## Features
 

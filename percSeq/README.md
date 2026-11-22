@@ -4,7 +4,7 @@ percSeq is a 16-row hit sequencer for MPC drum tracks and chopped samples, for A
 
 > This software was developed with the assistance of a LLM.
 
-The user guide is in [docs.md](docs.md). This README has the details.
+The user guide is in [docs-percSeq.md](../docs-percSeq.md). This README has the details.
 
 ## How it works
 

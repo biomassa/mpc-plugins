@@ -4,7 +4,7 @@ Scala Retuner is an instrument plugin for Akai MPC standalone hardware (MPC OS 3
 
 > This software was developed with the assistance of a LLM.
 
-The user guide is in [docs.md](docs.md). This README has the details.
+The user guide is in [docs-Scala Retuner.md](../docs-Scala%20Retuner.md). This README has the details.
 
 ## How it works
 

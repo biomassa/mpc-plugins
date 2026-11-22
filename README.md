@@ -12,9 +12,10 @@ Plugins for Akai MPC standalone hardware, made with the official [MPC Plugin SDK
 | [scalaSeq](scalaSeq/) | Instrument (silent) | A monophonic pitch and gate sequencer for Scala tunings, with lanes, chance operations, locks and CC lanes. It plays MIDI on keygroup and OPx-4 tracks. |
 | [percSeq](percSeq/) | Instrument (silent) | A 16-row step sequencer for drum tracks and chopped samples. Each row has its own playhead, rate and length. Chance operations with a sound pool, FLAM, sample reverse, locks and CC lanes. It plays MIDI on a drum track. |
 
+The user guides (features and basic use) are in the root of this repository: [docs-percSeq.md](docs-percSeq.md), [docs-scalaSeq.md](docs-scalaSeq.md) and [docs-Scala Retuner.md](docs-Scala%20Retuner.md).
+
 Each plugin folder has:
 
-- `docs.md`: the user guide (features and basic use).
 - `README.md`: the details (parameters, setup, build and test).
 - `CHANGELOG.md` and `knownIssues.md`.
 

@@ -2,7 +2,7 @@
 
 scalaSeq is a monophonic pitch and gate sequencer for Scala tunings on Akai MPC standalone hardware. It makes no sound. It sends its notes through its own MIDI port, "scalaSeq MIDI Out". For each note it sends the nearest 12-TET note and a pitch bend, so keygroup and OPx-4 tracks play it in tune.
 
-For the parameter tables and the technical details, see the [README](README.md). For the problems that we know, see [knownIssues.md](knownIssues.md).
+For the parameter tables and the technical details, see the [README](scalaSeq/README.md). For the problems that we know, see [knownIssues.md](scalaSeq/knownIssues.md).
 
 ## Features
 

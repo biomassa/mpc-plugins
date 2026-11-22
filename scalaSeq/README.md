@@ -4,7 +4,7 @@ scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MP
 
 > This software was developed with the assistance of a LLM.
 
-The user guide is in [docs.md](docs.md). This README has the details.
+The user guide is in [docs-scalaSeq.md](../docs-scalaSeq.md). This README has the details.
 
 ## How it works
 
