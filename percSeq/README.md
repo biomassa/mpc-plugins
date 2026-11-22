@@ -3,6 +3,8 @@
 percSeq is a 16-row hit sequencer for MPC drum tracks and chopped samples, for Akai MPC standalone hardware (MPC OS 3.10.1 or later). It is the percussion version of [scalaSeq](../scalaSeq/README.md). It makes no sound. It plays its hits as MIDI notes on another track.
 
 > This software was developed with the assistance of a LLM.
+>
+> **The plugins are in a VERY EARLY DEVELOPMENT STAGE.** Expect bugs, missing features and changes that break saved projects. Many functions are not yet tested on the MPC. A plugin bug can freeze the MPC: save your work often.
 
 The user guide is in [docs-percSeq.md](../docs-percSeq.md). This README has the details.
 

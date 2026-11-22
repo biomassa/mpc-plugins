@@ -3,6 +3,8 @@
 Scala Retuner is an instrument plugin for Akai MPC standalone hardware (MPC OS 3.10.1 or later). It retunes the notes of its track to a Scala scale (.scl) and an optional keyboard mapping (.kbm). Other tracks play the retuned notes.
 
 > This software was developed with the assistance of a LLM.
+>
+> **The plugins are in a VERY EARLY DEVELOPMENT STAGE.** Expect bugs, missing features and changes that break saved projects. Many functions are not yet tested on the MPC. A plugin bug can freeze the MPC: save your work often.
 
 The user guide is in [docs-Scala Retuner.md](../docs-Scala%20Retuner.md). This README has the details.
 

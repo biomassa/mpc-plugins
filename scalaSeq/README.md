@@ -3,6 +3,8 @@
 scalaSeq is a monophonic pitch and gate sequencer for Scala tunings, for Akai MPC standalone hardware (MPC OS 3.10.1 or later). It is a port of `dingus.pitchGateSeq` (Max 9). It makes no sound. It plays its notes as MIDI on other tracks: keygroup tracks and OPx-4 tracks play them in tune.
 
 > This software was developed with the assistance of a LLM.
+>
+> **The plugins are in a VERY EARLY DEVELOPMENT STAGE.** Expect bugs, missing features and changes that break saved projects. Many functions are not yet tested on the MPC. A plugin bug can freeze the MPC: save your work often.
 
 The user guide is in [docs-scalaSeq.md](../docs-scalaSeq.md). This README has the details.
 
