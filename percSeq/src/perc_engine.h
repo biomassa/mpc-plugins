@@ -78,15 +78,9 @@ public:
         const int d = ((dir % 3) + 3) % 3;
         // REVERSE: the other way round until the loop restarts (random stays random)
         int d2 = (revf_ > 0 && d < 2) ? 1 - d : d;
-        const float msw = std::max(50.0f, std::min(75.0f, T.swing)) / 100.0f;
 
         // position inside the current step, with swing (pairs of steps)
-        const double pos0 = phase * n;
-        double pos = pos0;
-        const double pp = std::floor(pos0 / 2);
-        const double pu = pos0 - pp * 2;
-        if (pp * 2 + 1 < n)
-            pos = pp * 2 + ((pu < 2 * msw) ? pu / (2 * msw) : 1 + (pu - 2 * msw) / (2 - 2 * msw));
+        const double pos = posOf(phase, T);
         const double sub = pos - std::floor(pos);
         const double ds = sub - prevsub_;
         const bool newstep = ds < -0.5;
@@ -316,6 +310,39 @@ public:
 
     double posSteps = 0;     // the last position in steps (with swing), for SND NEXT
     int curStep() const { return cur_; }
+
+    // The position in steps (with swing) at a loop phase: the arithmetic of tick().
+    static double posOf(double phase, const Tables& T)
+    {
+        const int n = std::max(1, std::min(kMaxSteps, T.steps));
+        const float msw = std::max(50.0f, std::min(75.0f, T.swing)) / 100.0f;
+        const double pos0 = phase * n;
+        double pos = pos0;
+        const double pp = std::floor(pos0 / 2);
+        const double pu = pos0 - pp * 2;
+        if (pp * 2 + 1 < n)
+            pos = pp * 2 + ((pu < 2 * msw) ? pu / (2 * msw) : 1 + (pu - 2 * msw) / (2 - 2 * msw));
+        return pos;
+    }
+
+    // 2026-11-25 (performance): true when ticks up to (and including) a tick at phaseLast can only move the
+    // position: no hit sounds or waits (DELAY), the step does not change, and the next hit of the step does
+    // not start. Then one tick at phaseLast leaves the engine as the ticks of every sample would (no output).
+    // The caller makes sure that the loop phase does not wrap before phaseLast.
+    bool idleTill(double phaseLast, const Tables& T) const
+    {
+        if (rst_ || act_ || lastHigh_ || qon_) return false;
+        const double pos = posOf(phaseLast, T);
+        if (pos < posSteps || std::floor(pos) != std::floor(posSteps)) return false;
+        const double sub = pos - std::floor(pos);
+        if (sub < prevsub_) return false;
+        if (slot_ < kSlots && cur_ >= 0)
+        {
+            const Slot& sl = rev_ ? T.rev[cur_][slot_] : T.fwd[cur_][slot_];
+            if (sl.len > 0 && sub >= sl.off) return false;
+        }
+        return true;
+    }
 
 private:
     static int wrapi(int x, int m) { return ((x % m) + m) % m; }

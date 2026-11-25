@@ -32,7 +32,7 @@ OUT = os.path.join(PROJECT, "skins")
 # ---- geometry (must match src/ScalaSeq.cpp) ------------------------------------------------------
 GX, GY, GW, GH = 70, 88, 880, 540      # the roll (2.8: + the old velocity lane; was 476)
 RY, RH = 44, 40                         # ruler
-VY, VH = 50, 280                        # 2.8: the lane of the LANE page (velocity or CC bars)
+VY, VH = 60, 250                        # 2.8: the lane of the LANE page (velocity or CC bars); 2026-11-24: 260 (was 280), room for the Q badge
 PARK, PARKT, OFF = 40, 44, 1100         # right strip for parked lines; labels/rows park above; x-park offset
 NOTEH, NOTCHW, GAPW, BADGEW, NUMW, VELW = 24, 4, 2, 16, 40, 5
 RULER_PAD_H = 2628
@@ -42,6 +42,14 @@ FREEX, FREEY, FREEW, FREEH = PANELX, 488, 4 * QCOLW, 50   # 2.3: moved up for th
 SHOWN, PIECES, GAPS, STEPLINES, SNAPLINES, GRPLINES, NUMS = 32, 11, 7, 65, 89, 65, 64
 BG = "ff1e1d1e"
 NOTE_C, SEL_C, DARK_C = "d9a64d", "5dcaa5", "1e1d1e"
+# 2026-11-25 (user): the selected note is a dim body (teal at 30 % over the roll) with its ratchet hits on top
+# (teal at 30 / 55 / 80 / 100 % over the dim body), as in the Max roll; opaque, so the amber body under it does not show
+HIT_LEVELS, HIT_OPACITY, ROLL_BG, BODY_OPACITY = 4, (0.30, 0.55, 0.80, 1.0), "1a1a1a", 0.30
+
+
+def mix(c0, c1, f):
+    a, b = hexc(c0), hexc(c1)
+    return tuple(round(a[i] + (b[i] - a[i]) * f) for i in range(3)) + (0xff,)
 
 P = {}   # parameter name -> index (from build/params.json)
 CHOICES = {}   # parameter name -> choice names
@@ -145,10 +153,12 @@ def image(nm, colour, rect):
 
 SHORT = {"Degree": "Deg", "Period": "Per", "Length": "Len", "Entry Len": "Entry", "View Low": "Low",
          "View Start": "Start", "Sequence": "Seq"}
-BANKS = [("NOTE", ["Note", "Degree", "Period", "Move"]),
-         ("SHAPE", ["Length", "VEL", "GLIDE", "RATCH"]),
-         ("RATCH", ["FADE", "DUTY", "Entry Len", "Snap"]),
-         ("VIEW", ["View Low", "View Start", "Sequence", "Nudge"])]
+# 2026-11-24 (user): PITCH, TIME, SHAPE, VIEW; columns 1-3 as on the NOTE page. The titles are not drawn
+# (the MPC's Q badge covered the title of the active bank).
+BANKS = [("PITCH", ["Note", "Degree", "Period", "GLIDE"]),
+         ("TIME", ["Move", "Length", "Nudge", "Entry Len"]),
+         ("SHAPE", ["VEL", "RATCH", "FADE", "DUTY"]),
+         ("VIEW", ["View Low", "View Start", "Sequence", "Snap"])]
 # panel cells without drag: values that scalaSeq limits (they have < > step controls on the other pages)
 NO_DRAG = {"Note", "Move", "Length"}
 
@@ -158,8 +168,9 @@ def seq_tab(lists):
     ly = prm("Line Y")
     # header: names 24 px, values 30 px
     x = GX
+    # 2026-11-24: LAST PAD and PAD 1 moved to SETUP
     for label, pname, nw, vw in (("SEQ", "Sequence", 58, 46), ("NOTE", "Note", 74, 80), ("DEG", "Deg Text", 60, 100),
-                                 ("VIEW", "View Text", 70, 90), ("LAST PAD", "Last Note", 112, 56), ("PAD 1", "Pad 1 Note", 76, 56)):
+                                 ("VIEW", "View Text", 70, 90)):
         c.append(name_label(f"h_{label}", named(label, pname), f"{x} 2 {nw} 40", 24, "ff8a8885"))
         c.append(value_label(f"v_{label}", prm(pname), f"{x + nw} 2 {vw} 40", 30))
         x += nw + vw + 10
@@ -169,7 +180,6 @@ def seq_tab(lists):
     # the values are touch cells on top of the page (end of this function)
     for b, (title, names) in enumerate(BANKS):
         x = PANELX + b * QCOLW
-        c.append(name_label(f"bank{b}", named(title, names[0]), f"{x + 2} {RY} {QCOLW - 4} 28", 20, skin_ui.SEQ_LEGEND_C))
         for k, nm in enumerate(names):
             y = RY + 32 + k * 110
             h = named(SHORT[nm], nm) if nm in SHORT else prm(nm)
@@ -203,6 +213,12 @@ def seq_tab(lists):
     # the selected note again on top, in its own colour
     for k in range(PIECES):
         c.append(xypad(f"selp{k}", prm(f"Sel Piece {k}"), prm("Sel Y"), f"ssq_sp{k}.png", xpark_rect(GX, (1 << k) + 1, GY, GH)))
+    # 2026-11-25 (user): the selected note's ratchet hits on its dim body, one marker set per brightness step
+    for lv in range(HIT_LEVELS):
+        for k in range(8):
+            for pc in range(10 if k == 0 else 9):
+                c.append(xypad(f"hit{lv + 1}_{k + 1}_{pc}", prm(f"Hit X {lv + 1}.{k + 1}.{pc}"), prm("Sel Y"), f"ssq_h{lv}_{pc}.png",
+                               xpark_rect(GX, (1 << pc) + 1, GY, GH)))
     c.append(xypad("selnotch", prm("Sel Notch X"), prm("Sel Y"), "ssq_notch.png", xpark_rect(GX, NOTCHW, GY, GH)))
     # the selected note's marks again, above its highlight (2.3.1: the ring was hidden under it)
     for k in range(GAPS):
@@ -296,12 +312,15 @@ def mask_tab(name, fn_index, first, count):
     for col in range(4):   # each Q-Link column around the pads it has, 10 px gap
         ys = [SLOT_Y[3 - k // 4] for k in range(count) if k % 4 == col]
         if ys:
-            qb.append(f"{SLOT_X[col] - 10} {min(ys) - 10} {SLOT_W + 20} {max(ys) - min(ys) + SLOT_H + 20}")
+            top = min(ys) - skin_ui.QFRAME_TOP   # 2026-11-24: room for the MPC's Q badge
+            qb.append(f"{SLOT_X[col] - 10} {top} {SLOT_W + 20} {max(ys) + SLOT_H + 10 - top}")
     return {"version": 1, "tabName": name, "fnKeyIndex": fn_index, "fnKeySubIndex": 0,
             "componentDefinition": root, "qlinkBoundsData": qb}
 
 
 MASKS = [("MASK", 0, 16), ("MASK 2", 16, 15)]
+LOCK_FADER_W = 150   # 2026-11-24: Lock CC fader strip; the SEND button (90 px) sits right of it
+KIT_THEME = "mono"   # as ui.json "kit"
 
 
 def fine_by_default(tui):
@@ -329,7 +348,14 @@ def number_png(path, n):
 def pictures():
     for k in range(PIECES):
         png_pixels(os.path.join(OUT, f"ssq_p{k}.png"), (1 << k) + 1, NOTEH, lambda x, y: hexc(NOTE_C))
-        png_pixels(os.path.join(OUT, f"ssq_sp{k}.png"), (1 << k) + 1, NOTEH, lambda x, y: hexc(SEL_C))
+        body = mix(ROLL_BG, SEL_C, BODY_OPACITY)
+        png_pixels(os.path.join(OUT, f"ssq_sp{k}.png"), (1 << k) + 1, NOTEH, lambda x, y: body)
+    body = mix(ROLL_BG, SEL_C, BODY_OPACITY)
+    bodyhex = "%02x%02x%02x" % body[:3]
+    for lv in range(HIT_LEVELS):
+        col = mix(bodyhex, SEL_C, HIT_OPACITY[lv])
+        for pc in range(10):
+            png_pixels(os.path.join(OUT, f"ssq_h{lv}_{pc}.png"), (1 << pc) + 1, NOTEH, lambda x, y: col)
     png_pixels(os.path.join(OUT, "ssq_notch.png"), NOTCHW, NOTEH, lambda x, y: hexc(DARK_C))
     png_pixels(os.path.join(OUT, "ssq_gap.png"), GAPW, NOTEH, lambda x, y: hexc(DARK_C))
 
@@ -353,11 +379,19 @@ def pictures():
     png_pixels(os.path.join(OUT, "ssq_play.png"), 2, GH, lambda x, y: hexc("d31145"))
     png_pixels(os.path.join(OUT, "ssq_lnplay.png"), 2, VH, lambda x, y: hexc("d31145"))   # 2.8: LANE current step
     for i, nm in enumerate(("VEL", "CC 1", "CC 2")):
-        skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_on.png"), 90, 40, nm, skin_ui.ON_C, skin_ui.DARK_C, 24)
-        skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_off.png"), 90, 40, nm, skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
+        skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_on.png"), 100, HBH, nm, skin_ui.ON_C, skin_ui.DARK_C, 24)
+        skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_off.png"), 100, HBH, nm, skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
+    skin_ui.text_png(os.path.join(OUT, "ssq_lsend_on.png"), 90, HBH, "SEND", skin_ui.ON_C, skin_ui.DARK_C, 24)
+    skin_ui.text_png(os.path.join(OUT, "ssq_lsend_off.png"), 90, HBH, "SEND", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
     skin_ui.text_png(os.path.join(OUT, "ssq_send_on.png"), 90, 40, "SEND", skin_ui.ON_C, skin_ui.DARK_C, 24)
     skin_ui.text_png(os.path.join(OUT, "ssq_send_off.png"), 90, 40, "SEND", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
     png_pixels(os.path.join(OUT, "ssq_cursor.png"), 13, GH, lambda x, y: (0x37, 0x8a, 0xdd, 0x60))
+    png_pixels(os.path.join(OUT, "ssq_lncur.png"), 13, VH, lambda x, y: hexc(SEL_C)[:3] + (0x60,))   # 2026-11-24
+    # 2026-11-24: the short fader strip of the LOCK page (the kit's fader, LOCK_FADER_W px long)
+    sys.path.insert(0, os.path.join(SDK, "tools"))
+    import make_ui_kit
+    rows = make_ui_kit.render_fader(LOCK_FADER_W, 36, 127, make_ui_kit.make_theme(KIT_THEME), False, False)
+    make_ui_kit.write_png(os.path.join(OUT, "fader_h_uni_short.png"), LOCK_FADER_W, rows)
     png_pixels(os.path.join(OUT, "ssq_rowline.png"), GW, 1, lambda x, y: hexc("303030"))
     png_pixels(os.path.join(OUT, "ssq_period.png"), GW, 2, lambda x, y: hexc("8a8885"))
     for d in range(31):
@@ -390,30 +424,38 @@ GEN_OPTS = {
     "LANE": {"Lane CC": ("CC Num", [NOT_VEL]), "Lane Steps": ("Steps", [NOT_VEL]), "Rest": (None, [NOT_VEL]),
              "Lane Fine": ("Fine", [NOT_VEL, "IndexedEnabling/1/2/{Lane Mode}"])},
 }
+# 2026-11-24 (user): new slots (slot k = 4 * row + column)
 LISTS = {
-    "NOTE": [(10, "popup", "Entry Len"), (14, "pads", "Snap")],
+    # 2026-11-25 (user): Snap above Entry Len; the tall pads were cut in the bottom slot (seen on the MPC One G2)
+    "NOTE": [(11, "tallpads", "Snap"), (15, "popup", "Entry Len")],
     "CHANCE": [(0, "popup", "Op 1"), (1, "popup", "Op 2"), (2, "popup", "Op 3"), (3, "popup", "Op 4"),
                (8, "popup", "PTN 1"), (9, "popup", "PTN 2"), (10, "popup", "PTN 3"), (11, "popup", "PTN 4")],
-    "SETUP": [(6, "pads", "PTN Count")],
-    "RATE": [(4, "popup", "Rate"), (8, "pads", "Rate Mode"), (9, "pads", "Direction"), (12, "popup", "Ratio")],
+    "SETUP": [(2, "pads", "PTN Count")],
+    "RATE": [(0, "popup", "Rate"), (4, "pads", "Rate Mode"), (8, "popup", "Ratio"), (13, "pads", "Direction")],
     "LANE": [(10, "popup", "Lane Rate"), (11, "pads", "Lane Mode"), (12, "popup", "Lane Ratio"), (14, "pads", "Lane Dir")],
-    "OUTPUT": [(0, "popup", "Scale"), (3, "pads", "Curve")],
+    "OUTPUT": [(0, "popup", "Scale"), (10, "pads", "Curve")],
 }
 
 
-def qlink_bounds(slots):
+def qlink_bounds(slots, tall=(), top_min=0):
+    """One frame per column around its controls. 2026-11-24: the frame starts QFRAME_TOP px above the top
+    control, so the MPC's Q badge sits above the name; tall: slots whose pads run TALL_EXTRA px lower;
+    top_min: no frame starts above this y (the CHANCE header strip)."""
     out = []
     for col in range(4):
         rows = [k // 4 for k in slots if k % 4 == col]
         if rows:
             y0, y1 = skin_ui.SLOT_Y[min(rows)], skin_ui.SLOT_Y[max(rows)]
-            out.append(f"{skin_ui.SLOT_X[col] - 10} {y0 - 10} {skin_ui.SLOT_W + 20} {y1 - y0 + skin_ui.SLOT_H + 20}")
+            top = max(top_min, y0 - skin_ui.QFRAME_TOP)
+            # tall pads add room only when they are the column's bottom control
+            bottom = min(627, y1 + skin_ui.SLOT_H + 10 + (skin_ui.TALL_EXTRA if any(k % 4 == col and k // 4 == max(rows) for k in tall) else 0))
+            out.append(f"{skin_ui.SLOT_X[col] - 10} {top} {skin_ui.SLOT_W + 20} {bottom - top}")
     return out
 
 
 # 2.7: step controls: page -> [(slot, parameter, < parameter, > parameter)]
-STEPS = {"NOTE": [(0, "Note", "Note Prev", "Note Next"), (11, "Length", "Len Prev", "Len Next"),
-                  (12, "Move", "Move Prev", "Move Next")],
+STEPS = {"NOTE": [(0, "Note", "Note Prev", "Note Next"), (1, "Move", "Move Prev", "Move Next"),
+                  (5, "Length", "Len Prev", "Len Next")],
          "LOCK": [(2, "Note", "Note Prev", "Note Next")]}
 
 
@@ -442,10 +484,19 @@ def gen_opts(tab):
                 e["bounds"]["additionalInvalidatingHandles"] = e["bounds"].get("additionalInvalidatingHandles", []) + extra
 
 
+HBH = 56            # 2026-11-25 (user): LANE header button height
+LX, LW = 343, 918   # 2026-11-25 (user): the LANE page lane starts at Q-Link column 2 and runs to the right edge
+
+
+def xpark_lane(base_x, w, y, h):
+    """A pad for an x-parked marker on the LANE page lane (as xpark_rect, with the lane width)."""
+    return f"{base_x - OFF} {y} {OFF + LW + w} {h}"
+
+
 def lane_parts():
     """2.8: the LANE page under its generated controls: lane pads, the lane (velocity bars or thin CC
     bars at the steps of the SEQ view), the lane's current step (a line), a mask under the lane, the
-    touch guard and the lane touch pad."""
+    touch guard and the lane touch pad. 2026-11-25: the lane is at x LX .. LX + LW."""
     c = []
     fixed0 = ("Fixed/displayRange 0 1 valueRange 0 1 fineIncrement 0 coarseIncrement 0 defaultValue 0 "
               "displayString '' name '' value 0")
@@ -454,28 +505,82 @@ def lane_parts():
         e["bounds"]["version"] = 2
         e["bounds"]["additionalInvalidatingHandles"] = hs
         return e
-    c.append(image("lanebg", "ff1a1a1a", f"{GX} {VY} {GW} {VH}"))
-    c.append(vis(xypad("lnplay", prm("Lane Play X"), fixed0, "ssq_lnplay.png", f"{GX} {VY} {GW + PARK} {VH}"),
+    c.append(image("lanebg", "ff1a1a1a", f"{LX} {VY} {LW} {VH}"))
+    # 2026-11-24: the cursor of the CC lane (Lane Step, or the last touch), see-through teal, behind the bars
+    c.append(vis(xypad("lncur", prm("Lane Cur X"), prm("Line Y"), "ssq_lncur.png", xpark_lane(LX, 13, VY, VH)),
+                 [f"RangedEnabling/1/2/3/{lane}"]))
+    c.append(vis(xypad("lnplay", prm("Lane Play X"), fixed0, "ssq_lnplay.png", f"{LX} {VY} {LW + PARK} {VH}"),
                  [f"RangedEnabling/1/2/3/{lane}"]))
     for j in range(64):
         c.append(vis(xypad(f"lnbar{j + 1}", prm(f"Lane Bar X {j + 1}"), prm(f"Lane Bar Y {j + 1}"), "ssq_vel.png",
-                           xpark_rect(GX, VELW, VY, 2 * VH)), [f"RangedEnabling/1/2/3/{lane}"]))
+                           xpark_lane(LX, VELW, VY, 2 * VH)), [f"RangedEnabling/1/2/3/{lane}"]))
     vv = f"IndexedEnabling/0/3/{lane}"
     for j in range(SHOWN):
-        c.append(vis(xypad(f"vel{j + 1}", prm(f"Vel X {j + 1}"), prm(f"Vel Y {j + 1}"), "ssq_vel.png", xpark_rect(GX, VELW, VY, 2 * VH)), [vv]))
-    c.append(vis(xypad("selvel", prm("Sel Vel X"), prm("Sel Vel Y"), "ssq_svel.png", xpark_rect(GX, VELW, VY, 2 * VH)), [vv]))
+        c.append(vis(xypad(f"vel{j + 1}", prm(f"Vel X {j + 1}"), prm(f"Vel Y {j + 1}"), "ssq_vel.png", xpark_lane(LX, VELW, VY, 2 * VH)), [vv]))
+    c.append(vis(xypad("selvel", prm("Sel Vel X"), prm("Sel Vel Y"), "ssq_svel.png", xpark_lane(LX, VELW, VY, 2 * VH)), [vv]))
     c.append(image("lanemask", BG, f"0 {VY + VH} 1280 {VH + 4}"))
-    c.append(image("lanemaskl", BG, f"0 {VY} {GX} {VH}"))
-    c.append(image("lanemaskr", BG, f"{GX + GW} {VY} {1280 - GX - GW} {VH}"))
+    c.append(image("lanemaskl", BG, f"0 {VY} {LX} {VH}"))
+    c.append(image("lanemaskr", BG, f"{LX + LW} {VY} {1280 - LX - LW} {VH}"))
     c.append(xypad("touchguard", fixed0, fixed0, "ssq_none.png", "0 0 1280 628"))
     c.append(xypad("t_lane", f"ResetOnGestureEnd/{prm('Touch lane X')}", f"ResetOnGestureEnd/{prm('Touch lane Y')}", "ssq_none.png",
-                   f"{GX} {VY} {GW} {VH}"))
-    c.append(button("sendlane", prm("Send Lane"), "ssq_send_on.png", "ssq_send_off.png", 1, 1, f"{GX + GW - 90} 2 90 40"))
-    x = GX
+                   f"{LX} {VY} {LW} {VH}"))
+    # 2026-11-25 (user): bigger header buttons, 56 px tall (were 40); lane pads 100 wide (were 90)
+    c.append(button("sendlane", prm("Send Lane"), "ssq_lsend_on.png", "ssq_lsend_off.png", 1, 1, f"{LX + LW - 90} 0 90 {HBH}"))
+    x = LX
     for i, nm in enumerate(("VEL", "CC 1", "CC 2")):
-        c.append(button(f"lanesel{i}", lane, f"ssq_lane{i}_on.png", f"ssq_lane{i}_off.png", i, 3, f"{x} 2 90 40"))
-        x += 96
+        c.append(button(f"lanesel{i}", lane, f"ssq_lane{i}_on.png", f"ssq_lane{i}_off.png", i, 3, f"{x} 0 100 {HBH}"))
+        x += 106
     return c
+
+
+def lane_controls(lists):
+    """2026-11-25 (user): Q-Link column 1, knobs 1-2 as controls in slots 0 and 4 (left of the lane):
+    Lane Step as a < value > control and Lane Value as a fader, named STEP / VALUE (CC lane) or NOTE / VEL."""
+    lane = prm("Lane")
+    out = []
+    for tag, vis, t_step, t_val in (("cc", f"RangedEnabling/1/2/3/{lane}", "STEP", "VALUE"),
+                                    ("vel", f"IndexedEnabling/0/3/{lane}", "NOTE", "VEL")):
+        out += lists.step_control(f"ls_{tag}", P["Lane Step"], P["Lane Prev"], P["Lane Next"], 0, t_step, [vis])
+        x, y = skin_ui.slot_xy(4)
+        e = entry(f"lv_{tag}", "faderUni", {"version": 1, "handleName": "Data"}, f"{x} {y} {skin_ui.SLOT_W} {skin_ui.SLOT_H}",
+                  [{"key": "Data", "value": f"DisableCoarseIncrement/WithName[{t_val}]/{prm('Lane Value')}"}])
+        e["bounds"].update({"version": 2, "acceptsHWFocus": "Yes", "showWhenDataModelInvalid": "Hide",
+                            "additionalInvalidatingHandles": [vis]})
+        out.append(e)
+    return out
+
+
+# 2026-11-24 (user): the order of the function keys; a tuple = one key with sub-tabs (press the key again).
+# SUBTABS = False gives each page its own key in the same order (the fallback if sub-tabs fail on the MPC).
+SUBTABS = True
+TAB_ORDER = ["SEQ", "NOTE", "CHANCE", "LANE", "LOCK", "RATE", "SETUP", "OUTPUT", ("MASK", "MASK 2")]
+# Program Mode Q-Links (knobs banked to the plugin), one column per set, top to bottom (user, 2026-11-24)
+PROGRAM_COLUMNS = [["Sequence", "Range Start", "Range End", "Direction"], ["Rate", "Swing", "Ratio", "Fine"],
+                   ["Prob 1", "Prob 2", "Prob 3", "Prob 4"], ["VEL", "RATCH", "GLIDE", "Nudge"]]
+HDR_Y, HDR_H, CHANCE_SHIFT = 0, 30, 17   # CHANCE: header strip, and how far the controls move down
+
+
+def chance_header(lists):
+    """2026-11-24: CHANCE header strip (touch only): < > select the note; NOTE 3/3 and DEG 4(+1) as on SEQ."""
+    lt = lists._img("hdr_prev", 56, HDR_H, "<", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 26)
+    gt = lists._img("hdr_next", 56, HDR_H, ">", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 26)
+    c = [button("hdr_prev", prm("Note Prev"), lt, lt, 1, 1, f"23 {HDR_Y} 56 {HDR_H}"),
+         button("hdr_next", prm("Note Next"), gt, gt, 1, 1, f"85 {HDR_Y} 56 {HDR_H}")]
+    x = 160
+    for label, pname, nw, vw in (("NOTE", "Note", 74, 80), ("DEG", "Deg Text", 60, 100)):
+        c.append(name_label(f"ch_{label}", named(label, pname), f"{x} {HDR_Y} {nw} {HDR_H}", 24, "ff8a8885"))
+        c.append(value_label(f"cv_{label}", prm(pname), f"{x + nw} {HDR_Y} {vw} {HDR_H}", 26))
+        x += nw + vw + 10
+    return c
+
+
+def lock_cc_short(tab):
+    """2026-11-24: the Lock CC faders get the short strip (the header stays full width), for SEND at the right."""
+    ids = {f"Parameter {P[f'Lock CC {k + 1}']}" for k in range(4)}
+    for e in tab["componentDefinition"]["componentsData"]:
+        vals = [m["value"].split("/")[-1] for m in e["handle remapping"]["map"]]
+        if e["componentData"]["type"] == "faderUni" and any(v in ids for v in vals):
+            e["componentData"]["type"] = "faderUniShort"
 
 
 def main():
@@ -500,62 +605,105 @@ def main():
         tui = open(os.path.join(tmp, "TUI.json")).read()
         head, tabs, tail = skin_ui.split_tabs(tui)
         head = skin_ui.enlarge_kit(head)   # 2.7 text sizes of the generated faders and switches
+        head = skin_ui.short_fader_definition(head, LOCK_FADER_W)
         ui = json.load(open(os.path.join(PROJECT, "ui.json")))
         lists = skin_ui.Lists(OUT, "ssq", P["List Open"], N_LISTS)
         ql = json.load(open(os.path.join(tmp, "Q-Links.json")))
+        # the generated Q-Link map of each page, by page name (generated Tab n = ui.json page n)
+        qmap = {t["tabName"]: next(m["Q-Links"] for m in ql["Screen Mode Q-Links"]["map"] if m["Tab"] == ti + 1)
+                for ti, t in enumerate(tabs)}
+        def set_q(page, k, pidx):
+            qmap[page][f"Q-Link {skin_ui.qlink_of_slot(k)}"] = pidx
         for t in tabs:
-            t["fnKeyIndex"] += 1
-        for m in ql["Screen Mode Q-Links"]["map"]:
-            m["Tab"] += 1
-        for ti, t in enumerate(tabs):
-            page = next(pg for pg in ui["pages"] if pg["name"] == t["tabName"])
+            name = t["tabName"]
+            page = next(pg for pg in ui["pages"] if pg["name"] == name)
             slots = {k for k, c in enumerate(page["controls"]) if c != "empty"}
+            tall = set()
             fields, panels = [], []
-            for k, kind, name in LISTS.get(t["tabName"], []):
-                pidx = P[name]
-                title, vis, cols = LIST_OPTS.get(name, (None, [], None))
+            for k, kind, pname in LISTS.get(name, []):
+                pidx = P[pname]
+                title, vis, cols = LIST_OPTS.get(pname, (None, [], None))
                 vis = [handles(v) for v in vis] or None
-                if kind == "pads":
-                    fields += lists.pad_list(f"l{pidx}", pidx, CHOICES[name], k, title, vis, cols)
+                if kind in ("pads", "tallpads"):
+                    fields += lists.pad_list(f"l{pidx}", pidx, CHOICES[pname], k, title, vis, cols, tall=kind == "tallpads")
+                    if kind == "tallpads":
+                        tall.add(k)
                 else:
-                    fields += lists.popup_field(f"l{pidx}", pidx, LIST_IDS[name], k, title, vis)
-                    panels += lists.popup_panel(f"p{pidx}", pidx, CHOICES[name], LIST_IDS[name], (title or name).upper())
-                skin_ui.set_qlink(ql, ti + 2, k, pidx)
+                    fields += lists.popup_field(f"l{pidx}", pidx, LIST_IDS[pname], k, title, vis)
+                    panels += lists.popup_panel(f"p{pidx}", pidx, CHOICES[pname], LIST_IDS[pname], (title or pname).upper())
+                set_q(name, k, pidx)
                 slots.add(k)
             # 2.7: < value > step controls where scalaSeq limits the value (a fader handle would spring back)
-            for k, name, prev, nxt in STEPS.get(t["tabName"], []):
-                fields += lists.step_control(f"s{P[name]}", P[name], P[prev], P[nxt], k)
-                skin_ui.set_qlink(ql, ti + 2, k, P[name])
+            for k, pname, prev, nxt in STEPS.get(name, []):
+                fields += lists.step_control(f"s{P[pname]}", P[pname], P[prev], P[nxt], k)
+                set_q(name, k, P[pname])
                 slots.add(k)
             gen_opts(t)
-            if t["tabName"] == "LANE":
+            if name == "LANE":
                 t["componentDefinition"]["componentsData"][0:0] = lane_parts()
-            if t["tabName"] == "LOCK":   # SEND (one CC for MIDI Learn) next to each Lock CC
+                set_q(name, 0, P["Lane Step"])    # 2026-11-24: drawing knobs; 2026-11-25: their controls left of the lane
+                set_q(name, 4, P["Lane Value"])
+                fields += lane_controls(lists)
+                slots |= {0, 4}
+            if name == "LOCK":   # SEND (one CC for MIDI Learn) right of each short Lock CC fader
+                lock_cc_short(t)
                 for k in range(4):
-                    fields += lists.text_button(f"t{P[f'Send Lock {k + 1}']}", P[f"Send Lock {k + 1}"], "SEND", 3 + 4 * k)
-            if t["tabName"] == "SETUP":   # COPY, PASTE, CLEAR of the edited sequence (PASTE, CLEAR: touch twice)
-                for k, name, label in ((4, "Copy", "COPY"), (8, "Paste", "PASTE"), (12, "Clear Seq", "CLEAR")):
-                    fields += lists.text_button(f"t{P[name]}", P[name], label, k)
-            skin_ui.add_to_tab(t, fields + panels)
-            t["qlinkBoundsData"] = qlink_bounds(slots)
-        tabs.insert(0, seq_tab(lists))
-        n_tabs = len(tabs)
-        for i, (nm, first, cnt) in enumerate(MASKS):
-            tabs.append(mask_tab(nm, n_tabs + i, first, cnt))
-        tui = skin_ui.add_definitions(head, lists) + json.dumps(tabs, indent=4) + tail
-        tui = fine_by_default(tui)
-        with open(os.path.join(OUT, "TUI.json"), "w") as f:
-            f.write(tui)
-        qmap = {f"Q-Link {n}": -1 for n in range(1, 17)}
+                    sk = 1 + 4 * k
+                    x, y = skin_ui.slot_xy(sk)
+                    fields.append(button(f"sendlock{k + 1}", prm(f"Send Lock {k + 1}"), "ssq_send_on.png", "ssq_send_off.png", 1, 1,
+                                         f"{x + 15 + LOCK_FADER_W + 8} {y + 52} 90 40"))
+            if name == "SETUP":   # COPY, PASTE, CLEAR of the edited sequence (PASTE, CLEAR: touch twice)
+                for k, pname, label in ((4, "Copy", "COPY"), (8, "Paste", "PASTE"), (12, "Clear Seq", "CLEAR")):
+                    fields += lists.text_button(f"t{P[pname]}", P[pname], label, k)
+                x, y = skin_ui.slot_xy(3)   # LAST PAD under the Pad 1 Note fader (moved from the SEQ header)
+                fields.append(name_label("lastpad_n", named("LAST PAD", "Last Note"), f"{x + 15} {y + 90} 110 18", 20, "ff8a8885"))
+                fields.append(value_label("lastpad_v", prm("Last Note"), f"{x + 125} {y + 90} 60 18", 20))
+            if name == "NOTE":   # 2026-11-24: Delete as a text button (one touch; no Q-Link, a knob must not delete)
+                fields += lists.text_button(f"t{P['Delete']}", P["Delete"], "DELETE", 13)
+            if name == "CHANCE":   # 2026-11-24: header strip; the controls and frames move down under it (not the list panels)
+                skin_ui.add_to_tab(t, fields)
+                skin_ui.shift_tab(t, CHANCE_SHIFT)
+                skin_ui.add_to_tab(t, chance_header(lists) + panels)
+            else:
+                skin_ui.add_to_tab(t, fields + panels)
+            if name == "CHANCE":
+                qb = qlink_bounds(slots, top_min=HDR_H + 1)
+                t["qlinkBoundsData"] = [" ".join([r.split()[0], str(int(r.split()[1]) + (CHANCE_SHIFT if int(r.split()[1]) > HDR_H + 1 else 0)),
+                                                  r.split()[2], str(min(int(r.split()[3]) + CHANCE_SHIFT, 627 - max(HDR_H + 1, int(r.split()[1]))))])
+                                        for r in qb]
+            else:
+                t["qlinkBoundsData"] = qlink_bounds(slots, tall)
+        by_name = {t["tabName"]: t for t in tabs}
+        by_name["SEQ"] = seq_tab(lists)
+        seq_q = {f"Q-Link {n}": -1 for n in range(1, 17)}
         # one bank per column, top to bottom = Q-Link 13, 9, 5, 1 (column 1), 14, 10, 6, 2 (column 2) ...
         for b, (title, names) in enumerate(BANKS):
             for k, nm in enumerate(names):
-                qmap[f"Q-Link {13 + b - 4 * k}"] = P[nm]
-        ql["Screen Mode Q-Links"]["map"].insert(0, {"Tab": 1, "SubTab": 1, "Bank Direction": "Column", "Q-Links": qmap})
-        # MASK pages: Q-Link k + 1 = the pad at the same place
-        for i, (nm, first, cnt) in enumerate(MASKS):
-            ql["Screen Mode Q-Links"]["map"].append({"Tab": n_tabs + i + 1, "SubTab": 1, "Bank Direction": "Column",
-                "Q-Links": {f"Q-Link {k + 1}": (P[f"Deg {first + k}"] if k < cnt else -1) for k in range(16)}})
+                seq_q[f"Q-Link {13 + b - 4 * k}"] = P[nm]
+        qmap["SEQ"] = seq_q
+        for nm, first, cnt in MASKS:
+            by_name[nm] = mask_tab(nm, 0, first, cnt)
+            # MASK pages: Q-Link k + 1 = the pad at the same place
+            qmap[nm] = {f"Q-Link {k + 1}": (P[f"Deg {first + k}"] if k < cnt else -1) for k in range(16)}
+        order = TAB_ORDER if SUBTABS else [n for e in TAB_ORDER for n in (e if isinstance(e, tuple) else (e,))]
+        final, qentries = [], []
+        for key, e in enumerate(order):
+            for sub, nm in enumerate(e if isinstance(e, tuple) else (e,)):
+                t = by_name.pop(nm)
+                t["fnKeyIndex"], t["fnKeySubIndex"] = key, sub
+                final.append(t)
+                qentries.append({"Tab": key + 1, "SubTab": sub + 1, "Bank Direction": "Column", "Q-Links": qmap[nm]})
+        assert not by_name, f"pages missing from TAB_ORDER: {list(by_name)}"
+        ql["Screen Mode Q-Links"]["map"] = qentries
+        prog = {f"Q-Link {n}": -1 for n in range(1, 17)}
+        for col, names in enumerate(PROGRAM_COLUMNS):
+            for r, nm in enumerate(names):
+                prog[f"Q-Link {13 + col - 4 * r}"] = P[nm]
+        ql["Program Mode Q-Links"] = prog
+        tui = skin_ui.add_definitions(head, lists) + json.dumps(final, indent=4) + tail
+        tui = fine_by_default(tui)
+        with open(os.path.join(OUT, "TUI.json"), "w") as f:
+            f.write(tui)
         with open(os.path.join(OUT, "Q-Links.json"), "w") as f:
             json.dump(ql, f, indent=4)
         for n in os.listdir(tmp):

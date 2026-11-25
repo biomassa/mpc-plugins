@@ -35,10 +35,10 @@ int main()
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     blk(p, {}, -1, N, sr);
     // 16 notes by step entry (Entry Len 1 step), pitches walking over the pads
-    p.set(kPadNote, 60); p.set(kStepEntry, 1); blk(p, {}, -1, N, sr);
+    p.set(kPadNote, 37); p.set(kStepEntry, 1); blk(p, {}, -1, N, sr);   // 2026-11-25: 37 (45-91 are sequence notes)
     for (int i = 0; i < 16; ++i)
     {
-        const int k = 60 + (i * 5) % 12;
+        const int k = 37 + (i * 5) % 12;
         blk(p, {mpc::MidiEvent::noteOn(0, k, 100), mpc::MidiEvent::noteOff(0, k)}, -1, N, sr);
     }
     p.set(kStepEntry, 0); blk(p, {}, -1, N, sr);

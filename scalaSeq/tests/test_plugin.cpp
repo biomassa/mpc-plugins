@@ -86,6 +86,23 @@ int main()
     knob(kNoteSel, 2);
     knob(kDeg, 40);                                   // 12-edo: 40 * 12 / 64 = degree 7
     CHECK(s.notes[1].pitch == kCenter + 7, "degree knob: %d", s.notes[1].pitch - kCenter);
+    // 2026-11-25: a Q-Link writes 1/128 of the range at a time (measured on the MPC); 16 such writes up
+    // (8 knob steps) pass the next degree band (64 / 12 = 5.3 knob steps), so the degree goes up
+    {
+        const int before = s.notes[1].pitch;
+        for (int k = 0; k < 16; ++k) { p.setNormalised(kDeg, std::min(1.0f, p.getNormalised(kDeg) + 1.0f / 128)); block(p, {}); }
+        CHECK(s.notes[1].pitch > before, "Degree: small Q-Link writes change the degree: %d -> %d", before - kCenter, s.notes[1].pitch - kCenter);
+        for (int k = 0; k < 16; ++k) { p.setNormalised(kDeg, std::max(0.0f, p.getNormalised(kDeg) - 1.0f / 128)); block(p, {}); }
+        CHECK(s.notes[1].pitch == before, "Degree: the same writes down come back: %d", s.notes[1].pitch - kCenter);
+        knob(kNoteSel, 1); knob(kNoteSel, 2);   // another note and back: the knob goes to the middle of the degree
+        CHECK(std::fabs(p.get(kDeg) - std::floor((7 + 0.5f) / 12 * 64)) < 0.5f, "Degree knob at the middle of degree 7 after a note change: %g", p.get(kDeg));
+        // a note of the same degree: the knob still goes to the middle
+        p.setNormalised(kDeg, (std::floor((7 + 0.5f) / 12 * 64) + 2) / 63.0f); block(p, {});
+        CHECK(s.notes[1].pitch == kCenter + 7, "Degree: still degree 7 (%d)", s.notes[1].pitch - kCenter);
+        knob(kNoteSel, 1); knob(kNoteSel, 2);
+        CHECK(std::fabs(p.get(kDeg) - std::floor((7 + 0.5f) / 12 * 64)) < 0.5f, "Degree knob back at the middle after a note change: %g", p.get(kDeg));
+        knob(kDeg, 40);
+    }
     knob(kPeriod, 1);
     CHECK(s.notes[1].pitch == kCenter + 19, "period +1: %d", s.notes[1].pitch - kCenter);
     knob(kPeriod, 0);
@@ -705,6 +722,66 @@ int main()
         CHECK(cc == 0, "SEND sends nothing while the CC is off (%d)", cc);
     }
 
+    // ---- 2026-11-24: LANE drawing knobs (CC lane: step and value; VEL: note and VEL) and the cursor marker
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        Sequence& q = u.testModel().seqs[0];
+        q.count = 2; q.notes[0] = Note(); q.notes[0].st = 0; q.notes[1] = Note(); q.notes[1].st = 2; q.notes[1].v = 0.5f;
+        q.lane[0].steps = 8; q.lane[0].val[3] = 20;
+        u.internalResume(); block(u, {});
+        u.set(kLaneSel, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 1, "CC lane: Lane Step starts at step 1 (%f)", u.get(kLnStep));
+        u.set(kLnStep, 4); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnValue)) == 20, "Lane Step 4 shows the value of step 4 (%f)", u.get(kLnValue));
+        u.set(kLnNext, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 5 && u.get(kLnNext) == 0, "> moves Lane Step to 5 and goes off (%f)", u.get(kLnStep));
+        u.set(kLnPrev, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 4, "< moves Lane Step back to 4 (%f)", u.get(kLnStep));
+        CHECK(u.get(kLnCurX) > 0, "the cursor marker shows (%f)", u.get(kLnCurX));
+        u.set(kLnValue, 99); block(u, {}); block(u, {});
+        CHECK(q.lane[0].val[3] == 99, "Lane Value sets the value at the cursor (%d)", q.lane[0].val[3]);
+        u.set(kLnStep, 20); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 8, "Lane Step stops at the lane's Steps (%f)", u.get(kLnStep));
+        u.set(kLaneSel, 0); block(u, {}); block(u, {});
+        CHECK(u.get(kLnCurX) == 0, "no cursor marker on the VEL lane (%f)", u.get(kLnCurX));
+        u.set(kLnStep, 2); block(u, {}); block(u, {});
+        CHECK(u.testSel() == 1, "VEL lane: Lane Step selects note 2 (%d)", u.testSel());
+        CHECK((int)std::lround(u.get(kLnValue)) == 64, "VEL lane: Lane Value shows VEL 50 %% as 64 (%f)", u.get(kLnValue));
+        u.set(kLnValue, 127); block(u, {}); block(u, {});
+        CHECK(std::fabs(q.notes[1].v - 1.0f) < 1e-4f, "VEL lane: Lane Value 127 sets VEL 100 %% (%f)", q.notes[1].v);
+    }
+
+    // ---- 2026-11-25: the selected note's ratchet hits (DUTY widths, brightness steps by VEL x FADE)
+    {
+        ScalaSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(64); u.internalResume();
+        waitWorker(); block(u, {});
+        Sequence& q = u.testModel().seqs[0];
+        q.count = 1; q.notes[0] = Note(); q.notes[0].st = 0; q.notes[0].len = 4; q.notes[0].r = 4; q.notes[0].d = 0.5f;
+        q.notes[0].v = 1.0f; q.notes[0].fd = 0;
+        u.internalResume(); block(u, {});
+        u.set(kNoteSel, 1); block(u, {}); block(u, {});
+        auto shownAt = [&](int lv, int k) {
+            bool any = false;
+            for (int pc = 0; pc < hitPieces(k); ++pc) any = any || u.get(kHitX0 + lv * kHitSet + hitOffset(k) + pc) > 0;
+            return any;
+        };
+        bool ok = true;
+        for (int k = 0; k < 8; ++k)
+            for (int lv = 0; lv < kHitLevels; ++lv) ok = ok && shownAt(lv, k) == (k < 4 && lv == 3);
+        CHECK(ok, "RATCH 4, VEL 100 %%: 4 hits at the brightest step, nothing else");
+        const float stepPx = kGW / 16;   // Steps/Page 16
+        const float left1 = u.get(kHitX0 + 3 * kHitSet + hitOffset(1) + 4) * (kOFF + kGW) - kOFF;   // the 16 px piece of hit 2
+        CHECK(std::fabs(left1 - std::round(stepPx)) < 1.0f, "hit 2 starts at step 2 (%f, want %f)", left1, stepPx);
+        CHECK(u.get(kHitX0 + 3 * kHitSet + hitOffset(1) + 5) == 0, "hit 2 is half a step wide (DUTY 0.5): no 32 px piece");
+        q.notes[0].fd = 50; u.set(kRatch, 4); u.set(kFade, 50); block(u, {}); block(u, {});
+        CHECK(shownAt(3, 0) && shownAt(0, 3) && !shownAt(3, 3), "FADE +50: hit 1 brightest, hit 4 at the dimmest step");
+        u.set(kRatch, 1); block(u, {}); block(u, {});
+        CHECK(shownAt(3, 0) && !shownAt(3, 1), "RATCH 1: one hit over the whole note, brightness by VEL");
+    }
+
     // ---- 2026-11-22: a Range End at the last step follows Steps; one inside stays
     {
         ScalaSeq u;
@@ -759,6 +836,29 @@ int main()
         w.set(kSteps, 2); block(w, {});   // the host restores the Steps parameter with the project
         w.set(kSteps, 16); block(w, {});
         CHECK(l.count == 4, "after the load, Steps 16 brings them back: %d", l.count);
+    }
+    // ---- 2026-11-25: a note edit changes the display parameters of one drawing slot only (stable slots):
+    // a new note before 15 others, and its delete, take few reports (before: every later note moved slot)
+    {
+        ScalaSeq v;
+        v.internalSetSampleRate(48000); v.internalSetBlockSize(64); v.internalResume();
+        v.testHoldNotify.store(true);
+        waitWorker();
+        block(v, {});
+        Sequence& q = v.testModel().seqs[0];
+        const int vl = v.testViewLow();
+        for (int k = 0; k < 15; ++k) { Note n; n.st = 1.0f + k; n.len = 0.5f; n.pitch = (int16_t)(kCenter + vl + 2 + (k % 8)); q.insert(n); }
+        v.internalResume();
+        for (int i = 0; i < 4; ++i) block(v, {});
+        v.testTakePending();
+        touchAt(v, kRollTX, rx(0.2f), ry(12)); lift(v, kRollTX); block(v, {});
+        const int nNew = v.testTakePending();
+        CHECK(q.count == 16, "slots: a new note at step 0: %d notes", q.count);
+        touchAt(v, kRollTX, rx(0.2f), ry(12)); lift(v, kRollTX);
+        touchAt(v, kRollTX, rx(0.2f), ry(12)); lift(v, kRollTX); block(v, {});
+        const int nDel = v.testTakePending();
+        CHECK(q.count == 15, "slots: the double tap deletes it: %d notes", q.count);
+        CHECK(nNew <= 60 && nDel <= 60, "slots: few display reports: new note %d, delete %d", nNew, nDel);
     }
     std::printf(g_fail ? "%d FAILED\n" : "plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;

@@ -7,7 +7,37 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- Degree (2026-11-25, user: Q-Links seemed stuck): the knob turns like a normal knob. A Q-Link write moves a parameter by 1-3 x 1/128 of its range (measured on the MPC), less than one degree band of the knob (64 / number of degrees), and scalaSeq wrote the knob back to the middle of the degree after each write, so a turn did not change the degree. Now the knob goes to the middle of the degree only when another note is selected, or when the knob points to a degree the note cannot take. New test: 16 writes of 1/128 change the degree (fails with the old code).
+- SEQ page (2026-11-25, as percSeq): each shown note keeps its drawing slot. Before, one new or deleted note moved every later note to another slot. With 15 notes on the screen, a new note now takes 38 display reports (was 128), a delete 35 (was 126). New test (fails with the old code).
+
 ### Changed
+
+- NOTE page (2026-11-25): Snap is above Entry Len (was below). The Q-Link knobs 3 and 4 of that column swapped with them.
+
+- Performance (2026-11-25, no change in what plays): the loop phase is a multiply and a floor with the loop length computed once per block (was std::fmod and ratioOf for every sample; measured on the desktop: 2.5 -> 1.9 us per block, playing). After a project load the copy for project saving is made on the UI thread; before, the audio thread also copied the whole model (497 KB) after the load and on the first block after the plugin was added.
+- tests/bench.cpp: Pad 1 Note 37 (60 is a sequence note since 2.5, so the bench entered no notes).
+
+- SEQ page: the selected note is drawn as in the Max roll (user, 2026-11-25): a dim teal body (30 %) with its ratchet hits on top. Each ratchet hit starts at its place and is DUTY of a ratchet hit long; its brightness (4 steps: 30, 55, 80, 100 %, the nearest to 0.15 + 0.85 x velocity) follows its velocity (VEL with FADE, as the engine). With RATCH 1 the whole note is one hit, its brightness by VEL. The other notes keep the ratchet gaps. New display parameters for the hit markers (292, added at the end).
+
+- LANE header (2026-11-25, user: the buttons were too hard to hit on the MPC): the buttons are 56 px tall (were 40), the lane pads 100 px wide (were 90). The lane starts at y 60 and is 250 px high (was 260); its bottom did not move. The SEQ and LOCK pages keep their buttons.
+
+- LANE (2026-11-25, after a test on the MPC One G2: the drawing knobs worked but nothing on the screen named them): the lane starts at Q-Link column 2 and runs to the right edge (x 343-1261, 918 px; was x 70-950). Q-Link column 1, left of the lane, shows the two drawing controls: STEP (Lane Step, a < value > control) and VALUE (Lane Value, a fader); with VEL shown they are named NOTE / VEL. The header text STEP / VALUE is removed; the lane pads and SEND moved with the lane. New parameters Lane Prev and Lane Next (the < > buttons, added at the end).
+
+- Redesign of the pages and Q-Links (user, 2026-11-24). The MPC One G2 has 4 Q-Links: they control one column at a time, and the Q-Link button stops on every column, also on an empty one. Each Q-Link column now holds one set of controls.
+- **After this update, remove the plugin from its track and add it again.** The Q-Link assignments changed, and the MPC keeps the old ones in a project until the plugin is added again (measured before).
+- SEQ page, Q-Link panel: the columns are PITCH (Note, Degree, Period, GLIDE), TIME (Move, Length, Nudge, Entry Len), SHAPE (VEL, RATCH, FADE, DUTY) and VIEW (View Low, View Start, Sequence, Snap). The bank titles are removed (the MPC's Q badge covered the title of the active bank).
+- NOTE page: the same first 3 columns as the SEQ panel; column 4 is step entry (Step Entry, Cursor, Snap, Entry Len). Delete is a DELETE button (one touch, as before; no Q-Link).
+- Snap (NOTE page): the 6 pads are taller (36 px, were 26) and fill the slot.
+- Page order: SEQ, NOTE, CHANCE, LANE, LOCK, RATE, SETUP, OUTPUT, MASK. MASK 2 is a sub-page of MASK: push the MASK button again.
+- RATE: Rate, Mode, Ratio, Fine / Steps, Range Start, Range End, Direction / Swing. OUTPUT: Scale, Root, Root Tune / Out Ch, Voices / Bend Up, Bend Down, Curve. SETUP: Sequence, COPY, PASTE, CLEAR / Steps/Page, Group / PTN Count, Velocity / Pad 1 Note, Clear Ops, Clear All Ops.
+- LOCK: each Lock CC has a shorter fader with SEND at its right; Note < > (column 3) and Sequence (column 4).
+- LAST PAD and PAD 1 moved from the SEQ header to SETUP (LAST PAD shows under the Pad 1 Note fader).
+- Clear Note and Clear All are now called Clear Ops and Clear All Ops (they clear the chance lanes). The parameter ids did not change.
+- The orange Q-Link frames start 36 px above the top control, so the MPC's Q badge sits above the name and does not cover it.
+- LANE: the lane is 260 px high (was 280), so the Q badge fits above the settings.
+- Program Mode Q-Links (the knobs when they control the plugin): Sequence, Range Start, Range End, Direction / Rate, Swing, Ratio, Fine / Prob 1-4 / VEL, RATCH, GLIDE, Nudge.
 
 - Steps no longer deletes notes. When Steps goes down, the notes outside it are kept, and a note that crosses the end plays cut at the end. When Steps goes up again, they come back, and a cut note gets its full length back. An edit of a cut note (any change, for example VEL or length) makes the edit count: it keeps its cut length. Kept notes are saved in the project, and COPY, PASTE and CLEAR include them. They count toward the limit of 256 notes per sequence.
 - SEQ page: the right end of the ruler shows "+N kept" (amber) when the sequence has notes outside Steps. New display parameter Kept Text (added at the end).
@@ -16,12 +46,16 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- NOTE page: the second row of the Snap pads was cut in half (seen on the MPC One G2, 2026-11-25). The pads' container was one slot tall (107 px) and the MPC cuts what is outside it; it is now as tall as the pads. (The first guess, the bottom of the screen, was wrong: the pads were cut in the upper slot too.)
+
 - Pop-up lists: the MPC's orange Q-Link frame was drawn over an open list. The list panels now ask the MPC to hide the frame while they are shown (hideQLinkBounds, component version 4). Seen working on the MPC One G2: the frame is hidden only while a list is open.
 - SEQ page, Q-Link panel: the values of the drag cells did not show on the MPC One G2 (the MPC's ValueSlider knob draws no text there). Each value is now a text label, with the drag knob on top of it.
 - Range End (RATE page): when Range End is at the last step, it now follows Steps. Before, Steps 16 -> 1 -> 16 left Range End at 1, and only 1 step played. A Range End inside the steps stays; it is clipped when Steps goes below it. When it is clipped to the last step, it follows Steps from then on.
 
 ### Added
 
+- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. The header shows STEP and VALUE. With VEL shown, knob 1 selects the note and knob 2 sets its VEL (the header shows NOTE and VEL). New parameters Lane Step, Lane Value and Lane Cur X (added at the end).
+- CHANCE: a header strip at the top with < > (select the note), NOTE and DEG. The controls moved 17 px down.
 - A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
 
 ## [2.8.0] - 2026-11-22

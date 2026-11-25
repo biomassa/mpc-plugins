@@ -56,6 +56,11 @@ constexpr int kRows = 16;
 constexpr int kShown = 32;          // notes drawn exactly on one screen
 constexpr int kPieces = 11;         // bar pieces of 1, 2, 4 ... 1024 px
 constexpr int kGaps = 7;            // ratchet gaps per note (8 ratchets)
+// 2026-11-25: ratchet hits of the selected note: 4 brightness steps x 8 hits; pieces of hit k
+constexpr int kHitLevels = 4, kHitSet = 73;
+constexpr int hitPieces(int k) { return k == 0 ? 10 : 9; }
+constexpr int hitOffset(int k) { return k == 0 ? 0 : 10 + (k - 1) * 9; }
+const float kHitOpacity[kHitLevels] = {0.30f, 0.55f, 0.80f, 1.0f};
 constexpr int kStepLines = 65, kSnapLines = 89, kGrpLines = 65, kNums = 64;
 
 enum ParamIndex
@@ -108,7 +113,14 @@ enum ParamIndex
     kSend0, kNumSends = 5,
     // 2026-11-22: "+N kept" (notes outside Steps), at the right end of the ruler
     kKeptText = kSend0 + kNumSends,
-    kNumParams = kKeptText + 1
+    // 2026-11-24: LANE drawing knobs (CC lane: step and value; VEL: note and VEL) and the lane cursor marker
+    kLnStep, kLnValue, kLnCurX,
+    // 2026-11-25: < > of the Lane Step control (LANE page, column 1)
+    kLnPrev, kLnNext,
+    // 2026-11-25 (user): the selected note's ratchet hits on the roll, as in the Max roll: one marker set per
+    // brightness step (kHitLevels) and hit (8); hit 1 has 10 pieces (up to 1023 px), hits 2-8 have 9
+    kHitX0,
+    kNumParams = kHitX0 + 4 * 73
 };
 constexpr int kFirstEdit = kSteps, kLastEdit = kSequence;
 // 2.5: MIDI notes 60-91 on this track select sequences 1-32 (fixed). The 16 pad rows (Pad 1 Note
@@ -123,7 +135,10 @@ constexpr float kPARK = 40;                      // masked strip right of the ro
 constexpr float kPARKT = 44;                     // labels / row lines park above the roll (masked)
 constexpr float kOFF = 1100;                     // x-parked markers: pad starts kOFF px left of the roll
 constexpr float kNoteH = 24;
-constexpr float kNotchW = 4, kGapW = 2, kBadgeW = 16, kNumW = 40, kVelW = 5, kVelH = 280, kFreeW = 272;   // 2.8: kVelH = the LANE page lane height
+constexpr float kNotchW = 4, kGapW = 2, kBadgeW = 16, kNumW = 40, kVelW = 5, kVelH = 250, kFreeW = 272;   // 2.8: kVelH = the LANE page lane height
+// 2026-11-25 (user): the LANE page lane starts at Q-Link column 2 and runs to the right edge (918 px). It shows
+// the SEQ view (View Start, Steps/Page) like the roll; lane x = roll x * kLK.
+constexpr float kLW = 918, kLK = kLW / kGW;
 constexpr float kRulerPadH = 2628;               // ruler touch pad height (tall, so drags have room)
 constexpr float kMinLinePx = 10;                 // snap lines closer than this are hidden
 constexpr float kNumMinPx = 30;                  // ruler numbers at least this far apart
@@ -275,8 +290,8 @@ public:
         // 2.1: MIDI goes out scheduled at the exact time of its sample, plus this delay
         addParam(mpc::intParam   ("mididelay", "MIDI Delay*", 0, 30, 12, "ms"));   // not used in 2.1.1 (hidden)
         for (int l = 0; l < kLanes; ++l) disp(num("chancetext", l), num("Chance ", l), 0);
-        addParam(mpc::boolParam  ("clearnote", "Clear Note", false));   // clears the chance lanes of the selected note
-        addParam(mpc::boolParam  ("clearall",  "Clear All",  false));   // 1st touch arms, 2nd touch within 3 s clears all
+        addParam(mpc::boolParam  ("clearnote", "Clear Ops",  false));   // clears the chance lanes of the selected note
+        addParam(mpc::boolParam  ("clearall",  "Clear All Ops", false));   // 1st touch arms, 2nd touch within 3 s clears all
         for (int k = 0; k < kGaps; ++k) disp("selgap" + std::to_string(k + 1), "Sel Gap " + std::to_string(k + 1), 0);
         disp("selglidex", "Sel Glide X", 0); disp("selchancex", "Sel Chance X", 0);
         addParam(mpc::intParam   ("listopen",  "List Open",  0, 14, 0));   // 2.8: + Ratio, Lane Rate, Lane Ratio
@@ -315,6 +330,20 @@ public:
             for (int k = 0; k < 4; ++k) addParam(mpc::boolParam(nm("sendlock", k).c_str(), nm("Send Lock ", k).c_str(), false));
             addParam(mpc::boolParam  ("sendlane",  "Send Lane",  false));
             addParam(mpc::floatParam ("kepttext",  "Kept Text",  0, 1, 0, "", 4));
+            // 2026-11-24: LANE drawing knobs and the cursor marker
+            addParam(mpc::intParam   ("lnstep",    "Lane Step",  1, kMaxSteps, 1));
+            addParam(mpc::intParam   ("lnvalue",   "Lane Value", 0, 127, 64));
+            addParam(mpc::floatParam ("lncurx",    "Lane Cur X", 0, 1, 0, "", 4));
+            addParam(mpc::boolParam  ("lnprev",    "Lane Prev",  false));   // 2026-11-25: < > of Lane Step
+            addParam(mpc::boolParam  ("lnnext",    "Lane Next",  false));
+            // 2026-11-25: ratchet hits of the selected note (x-park values of the pieces)
+            for (int l = 0; l < kHitLevels; ++l)
+                for (int k = 0; k < 8; ++k)
+                    for (int pc = 0; pc < hitPieces(k); ++pc)
+                    {
+                        const std::string sfx = std::to_string(l + 1) + "." + std::to_string(k + 1) + "." + std::to_string(pc);
+                        addParam(mpc::floatParam(("hitx" + sfx).c_str(), ("Hit X " + sfx).c_str(), 0, 1, 0, "", 4));
+                    }
         }
 
         if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
@@ -330,6 +359,8 @@ public:
         applyRoot();
         rebuildAll();
         refreshView();
+        *saved_ = *model_;   // 2026-11-25: here, not as a full copy on the first audio block
+        savedAll_ = false; savedDirty_ = true;
         const int n = g_instances.fetch_add(1);
         if (n == 0) std::snprintf(clientName_, sizeof clientName_, "scalaSeq");
         else        std::snprintf(clientName_, sizeof clientName_, "scalaSeq %d", n + 1);
@@ -358,7 +389,8 @@ public:
             for (int d = 0; d < kMaxMask; ++d) tuning_.mask[d] = model_->mask[d];
             edSeq_ = engSeq_ = std::max(0, std::min(kSeqs - 1, stagingView_[0]));
             sel_ = stagingView_[1]; viewStart_ = stagingView_[2]; viewLow_ = stagingView_[3];
-            savedAll_ = true;
+            savedDirty_ = true;   // 2026-11-25: saved_ got the whole model in loadExtraState (UI thread); this
+                                  // copies the edited sequence and the mask / pool again (small)
             loaded20 = true;
         }
         allNotesOff();
@@ -487,6 +519,11 @@ public:
         if (playing)
         {
             int ev = 0;
+            // 2026-11-25 (performance): 1 / loop length of the playing sequence, computed again only when the
+            // tables or the playing sequence change (a sequence note, swapNow); the phase is then a multiply and a
+            // floor, as in percSeq (was std::fmod and ratioOf for every sample)
+            int cT = -1, cS = -1;
+            double invLoop = 1;
             for (int i = 0; i < ctx.numFrames; ++i)
             {
                 // 2.5: sequence notes switch at their sample and start the sequence there
@@ -497,11 +534,16 @@ public:
                     ++ev;
                 }
                 const Tables& T = tables_[tIdx_];
-                const Sequence& ps = model_->seqs[engSeq_];   // 2.8: ratio mode of the playing sequence
-                const double sQ = ps.mode == 1 ? stepQ / ratioOf(ps.ratio, ps.fine) : stepQ;
-                const double loopQ = sQ * std::max(1, T.steps);
-                double ph = std::fmod(base + i * qps - anchorQ_, loopQ) / loopQ;
-                if (ph < 0) ph += 1;
+                if (tIdx_ != cT || engSeq_ != cS)
+                {
+                    cT = tIdx_; cS = engSeq_;
+                    const Sequence& ps = model_->seqs[engSeq_];   // 2.8: ratio mode of the playing sequence
+                    const double sQ = ps.mode == 1 ? stepQ / ratioOf(ps.ratio, ps.fine) : stepQ;
+                    invLoop = 1.0 / (sQ * std::max(1, T.steps));
+                }
+                double ph = (base + i * qps - anchorQ_) * invLoop;
+                ph -= std::floor(ph);
+                if (ph >= 1) ph = 0;
                 EngineOut o = engine_.tick(ph, true, T, sr);
                 if (engine_.wrappedNow && pendSwap_) swapNow();
                 curSample_ = sampleCount_ + (uint64_t)i;
@@ -530,21 +572,26 @@ public:
             const int ls = choiceAt(kLaneSel);
             const int st = (playing && ls > 0) ? lnIdx_[ls - 1] : -1;
             const float g = (st - (float)viewStart_) / zoom();
-            setDisp(kLnPlayX, (st >= 0 && g >= 0 && g < 1) ? padPos(g * kGW, 2, kGW + kPARK) : 1.0f);
+            setDisp(kLnPlayX, (st >= 0 && g >= 0 && g < 1) ? padPos(g * kLW, 2, kLW + kPARK) : 1.0f);
         }
         {   // 2026-11-22: "+N kept" of the edited sequence
             const int k = ed().keptOutside();
             if (tKept_.exchange(k) != k) textNotify(kKeptText);
         }
         if (notifyPending_) sent = true;
-        // copy for project saving: the edited sequence only (a full copy after a load)
+        // copy for project saving: the edited sequence only (2026-11-25: the full copy after a load is made in
+        // loadExtraState on the UI thread; savedAll_ is left for the tests)
         if ((savedDirty_ || savedAll_) && savedMutex_.try_lock())
         {
-            if (savedAll_) *saved_ = *model_;
-            else saved_->seqs[edSeq_] = model_->seqs[edSeq_];
-            for (int d = 0; d < kMaxMask; ++d) saved_->mask[d] = tuning_.mask[d];
-            savedMutex_.unlock();
-            savedDirty_ = savedAll_ = false;
+            if (!stagingReady_.load())   // 2026-11-25: not while a load waits for reset() (saved_ has the loaded data)
+            {
+                if (savedAll_) *saved_ = *model_;
+                else saved_->seqs[edSeq_] = model_->seqs[edSeq_];
+                for (int d = 0; d < kMaxMask; ++d) saved_->mask[d] = tuning_.mask[d];
+                savedMutex_.unlock();
+                savedDirty_ = savedAll_ = false;
+            }
+            else savedMutex_.unlock();
         }
         if (sent) { wakeMidi_.post(); notifyPending_ = false; }
     }
@@ -602,6 +649,15 @@ public:
                 return true;
             }
             case kDegText: out = tSel_.load() == 0 ? std::string("-") : degTxt(tDeg_.load()); return true;
+            case kLnStep:   // VEL lane: the selected note (as Note); CC lane: the cursor step
+                if (tLnMode_.load() > 0) { std::snprintf(b, sizeof b, "%d", tLnStep_.load()); out = b; }
+                else if (tSel_.load() == 0) out = "none";
+                else { std::snprintf(b, sizeof b, "%d/%d", tSel_.load(), dispCount_.load()); out = b; }
+                return true;
+            case kLnValue:  // VEL lane: VEL of the selected note (%); CC lane: the value at the cursor
+                if (tLnMode_.load() == 0 && tSel_.load() == 0) out = "-";
+                else { std::snprintf(b, sizeof b, "%d", tLnVal_.load()); out = b; }
+                return true;
             case kKeptText: if (tKept_.load() > 0) { std::snprintf(b, sizeof b, "+%d kept", tKept_.load()); out = b; } else out = ""; return true;
             case kViewText: std::snprintf(b, sizeof b, "%d-%d", tView0_.load() + 1, tView0_.load() + tZoom_.load()); out = b; return true;
             case kPeriod: case kNudge: std::snprintf(b, sizeof b, v == 0 ? "0" : "%+d", v); out = b; return true;
@@ -769,7 +825,10 @@ public:
         }
         for (int k = 0; k < 4; ++k) stagingView_[k] = view[k];
         embedPending_.store(true);
-        stagingReady_.store(true);
+        // 2026-11-25 (performance): the copy for project saving is made here (UI thread), not by a full-model
+        // copy on the audio thread after the load
+        // stagingReady_ is set under the lock: the audio thread copies into saved_ only while no load waits
+        { std::lock_guard<std::mutex> l(savedMutex_); *saved_ = *staging_; stagingReady_.store(true); }
         wake_.post();
     }
 
@@ -894,6 +953,23 @@ private:
             snapChoice(i, v);
             closeList(i);
         }
+        for (int i = kLnStep; i <= kLnValue; ++i)   // 2026-11-24: LANE drawing knobs
+        {
+            const float v = getNormalised(i);
+            if (v == lastSeen_[i]) continue;
+            lastSeen_[i] = v;
+            onEdit(i, plainOf(i, v));
+        }
+        for (int i = kLnPrev; i <= kLnNext; ++i)   // 2026-11-25: < > of Lane Step (one step, then off)
+        {
+            const float v = getNormalised(i);
+            if (v == lastSeen_[i]) continue;
+            lastSeen_[i] = v;
+            if (v < 0.5f) continue;
+            const int cur = (int)std::lround(plainOf(kLnStep, getNormalised(kLnStep)));
+            onEdit(kLnStep, (float)std::max(1, std::min(kMaxSteps, cur + (i == kLnNext ? 1 : -1))));
+            echo(i, 0);
+        }
         for (int i = kNotePrev; i <= kLenNext; ++i)   // 2.7: step buttons
         {
             const float v = getNormalised(i);
@@ -944,6 +1020,11 @@ private:
         if (m == 0) out[m++] = 0;
         return m;
     }
+    long degKey_ = -1;
+    // 2026-11-25: the drawing slots of the shown notes (refreshView): in use, pitch, start
+    bool slotUsed_[kShown] = {};
+    int slotPitch_[kShown] = {};
+    float slotSt_[kShown] = {};   // 2026-11-25: the note the Degree knob was last set for (echoKnobs)
     float degreeKnob(const Note& n) const
     {
         int list[kPitchN];
@@ -1052,6 +1133,33 @@ private:
             echo(kLane0 + l * 4 + 2, c.ptn); echo(kLane0 + l * 4 + 3, c.amt);
         }
         echoKnobs();
+        echoLaneKnobs();
+    }
+    // 2026-11-24: the LANE drawing knobs follow the shown lane: CC lane = cursor step and its value,
+    // VEL = the selected note and its VEL (0-127 on the knob, shown in %)
+    void echoLaneKnobs()
+    {
+        const int ls = choiceAt(kLaneSel);
+        tLnMode_.store(ls);
+        if (ls > 0)
+        {
+            const CcLane& L = ed().lane[ls - 1];
+            int& c = lnCur_[ls - 1];
+            c = std::max(0, std::min((int)L.steps - 1, c));
+            tLnStep_.store(c + 1); tLnVal_.store(L.val[c]);
+            echo(kLnStep, (float)(c + 1)); echo(kLnValue, (float)L.val[c]);
+        }
+        else
+        {
+            Note* n = selNote();
+            tLnStep_.store(n ? sel_ + 1 : 0);
+            tSel_.store(n ? sel_ + 1 : 0); dispCount_.store(ed().count);   // the text of Lane Step reads these
+            tLnVal_.store(n ? (int)std::lround(n->v * 100) : 0);
+            if (n) { echo(kLnStep, (float)(sel_ + 1)); echo(kLnValue, std::round(n->v * 127)); }
+        }
+        // texts and the cursor marker only when something changed (display traffic, see knownIssues)
+        const long long key = (((long long)ls * 1000 + tLnStep_.load()) * 1000 + tLnVal_.load()) * 1000 + ed().count;
+        if (lnKey_ != key) { lnKey_ = key; textNotify(kLnStep); textNotify(kLnValue); viewDirty_ = true; }
     }
     void echoKnobs()
     {
@@ -1063,7 +1171,18 @@ private:
         const float q = snapQ();
         const float grid = std::round(n->st / q) * q;
         echo(kNoteSel, (float)(sel_ + 1));
-        echo(kDeg, degreeKnob(*n));
+        // 2026-11-25 (user): Degree turns like a normal knob. A Q-Link writes 1/128 of the range at a time
+        // (measured on the MPC), less than one degree band; a write back to the band middle after each
+        // write kept the degree from changing. So the knob is set only when it points to another degree.
+        {
+            int list[kPitchN];
+            const int m = maskedDegrees(list);
+            const int at = std::max(0, std::min(m - 1, (int)std::lround(get(kDeg)) * m / 64));
+            const float mid = degreeKnob(*n);
+            const long key = (long)edSeq_ * 1024 + sel_;   // another note: the knob goes to the middle of its degree
+            if (key != degKey_ || at != std::max(0, std::min(m - 1, (int)mid * m / 64))) echo(kDeg, mid);
+            degKey_ = key;
+        }
         echo(kPeriod, (float)tuning_.periodOf(n->pitch));
         echo(kMove, (float)std::lround(grid / q));
         echo(kLen, (float)std::max(1L, std::lround(n->len / q)));
@@ -1250,7 +1369,24 @@ private:
             case kLockCC0: case kLockCC0 + 1: case kLockCC0 + 2: case kLockCC0 + 3:
                 s.lockCC[i - kLockCC0] = (uint8_t)ccOfIndex(iv); modelDirty_ = true;
                 break;
-            case kLaneSel: echo(kLaneSel, (float)choiceAt(kLaneSel)); echoLane(); viewDirty_ = true; break;
+            case kLaneSel: echo(kLaneSel, (float)choiceAt(kLaneSel)); echoLane(); echoLaneKnobs(); viewDirty_ = true; break;
+            // 2026-11-24: LANE drawing knobs
+            case kLnStep:
+            {
+                const int ls = choiceAt(kLaneSel);
+                if (ls > 0) lnCur_[ls - 1] = std::max(0, std::min((int)s.lane[ls - 1].steps - 1, iv - 1));
+                else if (s.count > 0) { sel_ = std::max(0, std::min(s.count - 1, iv - 1)); echoNote(); keepVisible(); }
+                echoLaneKnobs();
+                break;
+            }
+            case kLnValue:
+            {
+                const int ls = choiceAt(kLaneSel);
+                if (ls > 0) { s.lane[ls - 1].val[lnCur_[ls - 1]] = (uint8_t)std::max(0, std::min(127, iv)); savedDirty_ = true; }
+                else if (n) { n->v = std::max(0.01f, std::min(1.0f, iv / 127.0f)); modelDirty_ = true; echo(kVel, n->v * 100); }
+                echoLaneKnobs();
+                break;
+            }
             case kLnCC: case kLnSteps: case kLnRate: case kLnMode: case kLnRatio: case kLnFine: case kLnDir: case kLnRest:
             {
                 const int ls = choiceAt(kLaneSel);
@@ -1505,12 +1641,12 @@ private:
         if (t == 3)
         {
             // the velocity bar nearest to the finger (within 14 px)
-            const float fx = padPx(tc.x, kGW);
+            const float fx = padPx(tc.x, kLW);   // lane px
             int best = -1;
             float bd = 14;
             for (int i = 0; i < s.count; ++i)
             {
-                const float d = std::fabs(pxOfPos(s.notes[i].st) + kVelW * 0.5f - fx);
+                const float d = std::fabs(pxOfPos(s.notes[i].st) * kLK + kVelW * 0.5f - fx);
                 if (s.notes[i].st >= viewStart_ - kEps && s.notes[i].st < viewStart_ + zoom() - kEps && d < bd) { bd = d; best = i; }
             }
             gVelNote_ = best;
@@ -1686,7 +1822,7 @@ private:
         const int ls = choiceAt(kLaneSel);
         if (ls <= 0) return;
         CcLane& L = ed().lane[ls - 1];
-        const int step = (int)std::floor(posOfPx(padPx(tc.x, kGW)));
+        const int step = (int)std::floor(posOfPx(padPx(tc.x, kLW) / kLK));
         const int v = (int)std::lround(std::max(0.0f, std::min(1.0f, padPx(tc.y, kVelH) / kVelH)) * 127.0f);
         if (step < 0 || step >= L.steps) return;
         if (gLnLast_ >= 0 && gLnLast_ != step)
@@ -1697,6 +1833,8 @@ private:
         }
         L.val[step] = (uint8_t)v;
         gLnLast_ = step;
+        lnCur_[ls - 1] = step;   // 2026-11-24: a touch sets the cursor
+        echoLaneKnobs();
         viewDirty_ = true;
         savedDirty_ = true;
     }
@@ -1705,7 +1843,7 @@ private:
         Sequence& s = ed();
         if (gVelNote_ < 0 || gVelNote_ >= s.count) return;
         const float v = std::max(0.01f, std::min(1.0f, padPx(tc.y, kVelH) / kVelH));
-        if (std::fabs(v - s.notes[gVelNote_].v) > 1e-4f) { s.notes[gVelNote_].v = v; modelDirty_ = true; echo(kVel, v * 100); }
+        if (std::fabs(v - s.notes[gVelNote_].v) > 1e-4f) { s.notes[gVelNote_].v = v; modelDirty_ = true; echo(kVel, v * 100); echoLaneKnobs(); }
     }
 
     // ===== audio thread: keys (step entry, preview) ================================================
@@ -1946,6 +2084,11 @@ private:
     {
         return show ? std::max(0.0f, std::min(1.0f, (left + kOFF) / (kOFF + kGW))) : 0.0f;
     }
+    // 2026-11-25: the same for a marker on the LANE page lane (left in lane px, 0 .. kLW)
+    static float xParkLane(float left, bool show)
+    {
+        return show ? std::max(0.0f, std::min(1.0f, (left + kOFF) / (kOFF + kLW))) : 0.0f;
+    }
 
     // marks of note n drawn from a to b (px): ratchet gaps, glide ramp, chance ring (x-park values).
     // The ring shows for any chance operation that is set (also at 0 %).
@@ -2034,24 +2177,69 @@ private:
         // velocity bars. The later note is drawn on top.
         // whole pixels: the MPC places each piece on a whole pixel, and the pictures are 1 px wider
         // than their step (each piece overlaps the next), so no gap opens between pieces
-        auto bodyPieces = [&](int base, float a, float b, bool show) {   // pieces k at base + k
+        auto bodyPieces = [&](int base, float a, float b, bool show, int pieces = kPieces) {   // pieces k at base + k
             const float ra = std::round(a);
             int len = show ? std::max(1, (int)std::lround(b) - (int)ra) : 0;
             float x = ra;
-            for (int k = kPieces - 1; k >= 0; --k)
+            for (int k = pieces - 1; k >= 0; --k)
             {
                 const int w = 1 << k;
                 if (len >= w) { setDisp(base + k, xPark(x, (float)w, true)); x += w; len -= w; }
                 else setDisp(base + k, 0.0f);
             }
         };
-        int j = 0, selJ = -1;
-        for (int i = 0; i < s.count && j < kShown; ++i)
+        // 2026-11-25 (as percSeq): each shown note keeps its drawing slot from the last refresh (same pitch
+        // and start), so that an edit changes the parameters of one slot only. Before, slots went in note
+        // order and one new note moved every later note to the next slot.
+        int nShow = 0, selJ = -1;
+        int showIdx[kShown], slotOf[kShown];
+        for (int i = 0; i < s.count && nShow < kShown; ++i)
         {
             const Note& n = s.notes[i];
             const int r = n.pitch - (kCenter + viewLow_);
+            if (r < 0 || r >= kRows || std::min(kGW, pxOfPos(n.st + n.len)) <= 0 || std::max(0.0f, pxOfPos(n.st)) >= kGW) continue;
+            showIdx[nShow] = i; slotOf[nShow] = -1; ++nShow;
+        }
+        {
+            bool taken[kShown] = {};
+            // 1. the same pitch and start as before
+            for (int k = 0; k < nShow; ++k)
+            {
+                const Note& n = s.notes[showIdx[k]];
+                for (int j = 0; j < kShown; ++j)
+                    if (!taken[j] && slotUsed_[j] && slotPitch_[j] == n.pitch && std::fabs(slotSt_[j] - n.st) < kEps)
+                    { slotOf[k] = j; taken[j] = true; break; }
+            }
+            // 2. a moved note: a freed slot (nearest start), else an empty slot
+            for (int k = 0; k < nShow; ++k)
+            {
+                if (slotOf[k] >= 0) continue;
+                const float st = s.notes[showIdx[k]].st;
+                int best = -1, bestKind = 9;
+                float bestD = 0;
+                for (int j = 0; j < kShown; ++j)
+                {
+                    if (taken[j]) continue;
+                    const int kind = slotUsed_[j] ? 0 : 1;
+                    const float d = std::fabs(slotSt_[j] - st);
+                    if (kind < bestKind || (kind == bestKind && kind == 0 && d < bestD)) { best = j; bestKind = kind; bestD = d; }
+                }
+                slotOf[k] = best;   // always found: nShow <= kShown
+                taken[best] = true;
+            }
+            for (int j = 0; j < kShown; ++j) slotUsed_[j] = false;
+            for (int k = 0; k < nShow; ++k)
+            {
+                const int j = slotOf[k];
+                slotUsed_[j] = true; slotPitch_[j] = s.notes[showIdx[k]].pitch; slotSt_[j] = s.notes[showIdx[k]].st;
+            }
+        }
+        for (int k = 0; k < nShow; ++k)
+        {
+            const int i = showIdx[k], j = slotOf[k];
+            const Note& n = s.notes[i];
+            const int r = n.pitch - (kCenter + viewLow_);
             const float a = std::max(0.0f, pxOfPos(n.st)), b = std::min(kGW, pxOfPos(n.st + n.len));
-            if (r < 0 || r >= kRows || b <= 0 || a >= kGW) continue;
             const bool startShown = n.st >= v0 - kEps;
             setDisp(kNoteY0 + j, padPos(rowCentre(r), kNoteH, kGH));
             bodyPieces(kPieceX0 + j * kPieces, a, b, true);
@@ -2061,13 +2249,13 @@ private:
             for (int k = 0; k < kGaps; ++k) setDisp(kGapX0 + j * kGaps + k, marks[k]);
             setDisp(kGlideX0 + j, marks[kGaps]);
             setDisp(kChanceX0 + j, marks[kGaps + 1]);
-            setDisp(kVelX0 + j, xPark(a, kVelW, startShown));
+            setDisp(kVelX0 + j, xParkLane(a * kLK, startShown));
             setDisp(kVelY0 + j, n.v);
             if (i == sel_) selJ = j;
-            ++j;
         }
-        for (; j < kShown; ++j)
+        for (int j = 0; j < kShown; ++j)
         {
+            if (slotUsed_[j]) continue;
             bodyPieces(kPieceX0 + j * kPieces, 0, 0, false);
             setDisp(kNotchX0 + j, 0.0f);
             for (int k = 0; k < kGaps; ++k) setDisp(kGapX0 + j * kGaps + k, 0.0f);
@@ -2085,9 +2273,34 @@ private:
             setDisp(kSelVelY, n.v);
             float marks[kGaps + 2];
             noteMarks(n, a, b, n.st >= v0 - kEps, marks);
-            for (int k = 0; k < kGaps; ++k) setDisp(kSelGapX0 + k, marks[k]);
+            for (int k = 0; k < kGaps; ++k) setDisp(kSelGapX0 + k, 0.0f);   // 2026-11-25: the hits show the ratchets
             setDisp(kSelGlideX, marks[kGaps]);
             setDisp(kSelChanceX, marks[kGaps + 1]);
+            // 2026-11-25 (user): the ratchet hits, as in the Max roll: hit k starts at k / RATCH of the note and is
+            // DUTY of a hit long (the whole note with RATCH 1); its brightness step follows its velocity
+            // (VEL x FADE, as the engine), opacity 0.15 + 0.85 x velocity, the nearest of kHitOpacity
+            const float A = pxOfPos(n.st), B = pxOfPos(n.st + n.len);
+            const int hits = std::max(1, std::min(8, (int)n.r));
+            const float hw = (B - A) / hits, duty = hits > 1 ? n.d : 1.0f;
+            for (int k = 0; k < 8; ++k)
+            {
+                float x0 = A + k * hw, x1 = x0 + std::max(1.0f, hw * duty);
+                x0 = std::max(x0, a); x1 = std::min(x1, b);
+                const bool show = k < hits && x1 > x0;
+                float hv = n.v;
+                if (hits > 1 && n.fd != 0)
+                {
+                    const float hn = (float)k / (hits - 1);
+                    const float fm = std::pow(0.01f, std::abs((float)n.fd) / 50.0f);
+                    hv = n.v * (n.fd < 0 ? std::pow(fm, 1 - hn) : std::pow(fm, hn));
+                }
+                const float o = 0.15f + 0.85f * hv;
+                int lv = 0;
+                for (int l = 1; l < kHitLevels; ++l)
+                    if (std::fabs(kHitOpacity[l] - o) < std::fabs(kHitOpacity[lv] - o)) lv = l;
+                for (int l = 0; l < kHitLevels; ++l)
+                    bodyPieces(kHitX0 + l * kHitSet + hitOffset(k), x0, x1, show && l == lv, hitPieces(k));
+            }
         }
         else
         {
@@ -2097,6 +2310,8 @@ private:
             for (int k = 0; k < kGaps; ++k) setDisp(kSelGapX0 + k, 0.0f);
             setDisp(kSelGlideX, 0.0f);
             setDisp(kSelChanceX, 0.0f);
+            for (int l = 0; l < kHitLevels; ++l)
+                for (int k = 0; k < 8; ++k) bodyPieces(kHitX0 + l * kHitSet + hitOffset(k), 0, 0, false, hitPieces(k));
         }
         // 2.8: LANE: a thin bar at each step of the view of the shown CC lane (height = value)
         {
@@ -2106,9 +2321,13 @@ private:
             {
                 const int step = viewStart_ + j;
                 const bool show = L && step < L->steps && step < viewStart_ + zoom() - kEps;
-                setDisp(kLnBarX0 + j, xPark(pxOfPos((float)step), kVelW, show));
+                setDisp(kLnBarX0 + j, xParkLane(pxOfPos((float)step) * kLK, show));
                 setDisp(kLnBarY0 + j, show ? L->val[step] / 127.0f : 0.0f);
             }
+            // 2026-11-24: the cursor of the CC lane, 13 px wide, centred on the bar of its step
+            const int cs = L ? lnCur_[ls - 1] : -1;
+            const bool cshow = L && cs >= viewStart_ && cs < viewStart_ + zoom() - kEps && cs < L->steps;
+            setDisp(kLnCurX, xParkLane(pxOfPos((float)cs) * kLK + kVelW * 0.5f - 6.5f, cshow));
         }
         setDisp(kLineY, 0.5f);
         updateTexts();
@@ -2192,6 +2411,9 @@ private:
             const auto now = std::chrono::steady_clock::now();
             if (now - lastNotify < std::chrono::milliseconds(kDisplayMs)) continue;   // an early wake (scale load)
             lastNotify = now;
+#ifdef SCALASEQ_TEST
+            if (testHoldNotify.load()) continue;
+#endif
             for (int i = 0; i < kNumParams; ++i)
                 if (notify_[i].exchange(false, std::memory_order_acquire)) notifyHostParameterChanged(i);
         }
@@ -2260,6 +2482,9 @@ private:
     // value texts (written by the audio thread, read by formatValue)
     std::atomic<int> tSel_{0}, tDeg_{0}, tView0_{0}, tZoom_{16};
     std::atomic<int> tKept_{0};   // 2026-11-22: kept notes of the edited sequence
+    std::atomic<int> tLnMode_{0}, tLnStep_{1}, tLnVal_{0};   // 2026-11-24: LANE knob texts
+    long long lnKey_ = -1;   // 2026-11-24: the last LANE knob state that was shown
+    int lnCur_[kCcLanes] = {0, 0};   // 2026-11-24: the cursor step of each CC lane (not saved)
     std::atomic<int> tChOp_[kLanes] = {}, tChProb_[kLanes] = {}, tChAmt_[kLanes] = {};
     bool clearArmed_ = false;
     bool seqArmed_[2] = {false, false}, pastePending_ = false;   // 2.8: PASTE, CLEAR armed
@@ -2317,6 +2542,8 @@ public:
     Model& testModel() { return *model_; }
     void testSaveAll() { savedAll_ = true; }
     int testSel() const { return sel_; }
+    std::atomic<bool> testHoldNotify{false};   // 2026-11-25: the worker sends no reports (the test counts them)
+    int testTakePending() { int n = 0; for (int i = 0; i < kNumParams; ++i) n += notify_[i].exchange(false) ? 1 : 0; return n; }
     float testCursor() const { return cursor_; }
     int testViewLow() const { return viewLow_; }
     int testViewStart() const { return viewStart_; }

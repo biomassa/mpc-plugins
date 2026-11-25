@@ -7,7 +7,40 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Fixed
+
+- SEQ page (2026-11-25, user: hits seen for a moment while setting, moving or deleting hits): each shown hit keeps its drawing slot. Before, the slots were filled in row order, so one new or deleted hit moved every later hit to another slot. That took up to about 200 display reports, which go out 30 per 50 ms pass, and the passes between showed bars in wrong places or missing. A new hit now takes 39 reports (2 passes), a delete 22, a drag 12-20 (desktop test, 31 hits shown). A new test runs the passes one by one, from every start position of the pass, and requires that no frame shows a bar that is in neither the old nor the new picture; it fails with the old code (201 reports, 17 wrong bars).
+
 ### Changed
+
+- ROW page (2026-11-25, user): the header CHANCE OP CCs is above column 2, and its labels are REV CC, OP CC and OP REST (were Rev CC, CC Num, CC Rest). The parameter names and ids did not change. The controls and Q-Link frames moved 17 px down under the header, as on CHANCE.
+- POOL page (2026-11-25, user): the header ROWS THAT SND+ / SND- / SND? CAN PICK is at the top. The pads moved 17 px down (same size); the Q-Link frames start under the header.
+
+- Performance (2026-11-25, no change in what plays): a row that stays idle for a whole block (no hit sounds, waits or starts; the step does not change; the next hit does not start) is ticked once at the block end instead of at every sample. Not in a block with a sequence note, a jump, a pending switch, a Reset or a row start, and not while a hit uses SND NEXT. Desktop: 17 -> 2.6 us per block with short hits (median); unchanged (about 20 us) with a full-length hit on every step. A new differential test plays random patterns (all ops, swing, ratio rates, directions, Reset, switches, jumps, block sizes 32-512) in two instances, one forced to the per-sample path, and requires identical messages and steps; it fails when the idle check is broken on purpose.
+
+- HIT page (2026-11-25): Snap is above Entry Len (was below). The Q-Link knobs 3 and 4 of that column swapped with them.
+
+- Performance (2026-11-25, no change in what plays): the CC lanes of each row are checked once per block (before: every lane, every sample, also with the lane off); the bar line and Reset checks run their exact floor test only near the boundary (before: 3 floor divisions per sample). Measured on the desktop with 16 rows of hits: 21 -> 17 us per block (median), p99 50 -> 35-42 us. After a project load the copy for project saving is made on the UI thread; before, the audio thread also copied the whole model (1.9 MB) after the load and on the first block after the plugin was added.
+
+- SEQ page: the selected hit is drawn as in the Max roll (user, 2026-11-25): a dim teal body (30 %) with its ratchet hits on top. Each ratchet hit starts at its place and is DUTY of a ratchet hit long; its brightness (4 steps: 30, 55, 80, 100 %, the nearest to 0.15 + 0.85 x velocity) follows its velocity (VEL with FADE, as the engine). With RATCH 1 the whole hit is one hit, its brightness by VEL. The other hits keep the ratchet gaps. New display parameters for the hit markers (292, added at the end).
+
+- LANE header (2026-11-25, user: the buttons were too hard to hit on the MPC): the buttons are 56 px tall (were 40), the lane pads 100 px wide (were 90), the < > buttons 64 px wide (were 40), FOLLOW and SEND 80 px wide. The lane starts at y 60 and is 250 px high (was 260); its bottom did not move. The SEQ and LOCK pages keep their buttons.
+
+- LANE (2026-11-25, after a test on the MPC One G2: the drawing knobs worked but nothing on the screen named them): the lane starts at Q-Link column 2 and runs to the right edge (x 343-1261, 918 px; was x 70-950). Q-Link column 1, left of the lane, shows the two drawing controls: STEP (Lane Step, a < value > control) and VALUE (Lane Value, a fader); with VEL shown they are named HIT / VEL. The header text STEP / VALUE is removed; the lane pads and SEND moved with the lane. New parameters Lane Prev and Lane Next (the < > buttons, added at the end).
+
+- Redesign of the pages and Q-Links (user, 2026-11-24). The MPC One G2 has 4 Q-Links: they control one column at a time, and the Q-Link button stops on every column, also on an empty one. Each Q-Link column now holds one set of controls.
+- **After this update, remove the plugin from its track and add it again.** The Q-Link assignments changed, and the MPC keeps the old ones in a project until the plugin is added again (measured before).
+- SEQ page, Q-Link panel: the columns are HIT (Hit, Row, Move, Length), SHAPE (VEL, RATCH, FADE, DUTY), ENTRY (Nudge, Entry Len, Snap, Page) and ROW (Sel Row, Rate, Steps, Sequence). The bank titles are removed (the MPC's Q badge covered the title of the active bank).
+- HIT page: the same first 2 columns as the SEQ panel; column 3 is step entry (Step Entry, Cursor, Snap, Entry Len); column 4 Nudge and a DELETE button (one touch, as before; no Q-Link).
+- Snap (HIT page): the 6 pads are taller (36 px, were 26) and fill the slot.
+- Page order: SEQ, HIT, CHANCE, LANE, LOCK, ROW, POOL, SETUP. RATE is a sub-page of ROW: push the ROW button again.
+- RATE: Rate, Mode, Ratio, Fine / Steps, Range Start, Range End, Direction / Swing / Row < >. SETUP: Sequence, COPY, PASTE, CLEAR / Steps/Page, Group / PTN Count, Reset / Pad 1 Note, Out Ch, Clear Ops, Clear All Ops.
+- LOCK: each Lock CC has a shorter fader with SEND at its right; Hit < > and Row < > (column 3) and Sequence (column 4).
+- LAST PAD and PAD 1 moved from the SEQ header to SETUP (LAST PAD shows under the Pad 1 Note fader). The page buttons and FOLLOW moved left; FOLLOW no longer touches STEP ENTRY.
+- Clear Note and Clear All are now called Clear Ops and Clear All Ops (they clear the chance lanes). The parameter ids did not change.
+- The orange Q-Link frames start 36 px above the top control, so the MPC's Q badge sits above the name and does not cover it. On LANE the frames start under the red playhead line.
+- LANE: the lane is 260 px high (was 280), so the Q badge fits above the settings.
+- Program Mode Q-Links (the knobs when they control the plugin): Sequence, Range Start, Range End, Direction / Rate, Swing, Ratio, Fine (of the selected row) / Prob 1-4 / Sel Row, Hit, VEL, RATCH.
 
 - SEQ page: row numbers 1-16 (from the bottom) at the right of the roll, 22 px white.
 - Steps no longer deletes hits. When Steps goes down, the hits outside it are kept, and a hit that crosses the end plays cut at the end. When Steps goes up again, they come back, and a cut hit gets its full length back. An edit of a cut hit (any change, for example VEL or length) makes the edit count: it keeps its cut length. Kept hits are saved in the project, and COPY, PASTE and CLEAR include them. They count toward the limit of 64 hits per row.
@@ -18,7 +51,14 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - LANE page: the current step is a thin red line (4 px) under the bars, as wide as the step. Before, it was a white 25 % column behind the bars, which the bars hid. The VEL lane now shows it too (the selected row's current step); the CC lanes show their own step.
 - POOL pads and SEQ row labels: the row number is dim grey (8a8885) and the note is white, so the two numbers are different. They were one text in one colour. New display parameters Note Text 1-16 (added at the end; the parameter count is now 1,337).
 
+### Added
+
+- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column as wide as the step, behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. STEP and VALUE show right of SEND. With VEL shown, knob 1 selects the hit of the row and knob 2 sets its VEL (the text shows HIT and VEL). Each row has its own cursors (not saved). New parameters Lane Step, Lane Value and Lane Cur X 1-4 (added at the end).
+- CHANCE: a header strip at the top with Hit < >, Row < >, HIT and ROW. The controls moved 17 px down.
+
 ### Fixed
+
+- HIT page: the second row of the Snap pads was cut in half (seen on the MPC One G2, 2026-11-25). The pads' container was one slot tall (107 px) and the MPC cuts what is outside it; it is now as tall as the pads. (The first guess, the bottom of the screen, was wrong: the pads were cut in the upper slot too.)
 
 - Pop-up lists: the MPC's orange Q-Link frame was drawn over an open list. The list panels now ask the MPC to hide the frame while they are shown (hideQLinkBounds, component version 4). Seen working on the MPC One G2: the frame is hidden only while a list is open.
 - SEQ page, Q-Link panel: the values of the drag cells did not show on the MPC One G2 (the MPC's ValueSlider knob draws no text there). Each value is now a text label, with the drag knob on top of it.

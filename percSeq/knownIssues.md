@@ -6,9 +6,12 @@
 - **Status (1.0.0, 2026-11-22):** tested in the unit tests and the host simulator only.
 - 1.0.0 on the MPC One G2 (2026-11-22, reported by the user): the SEQ page button did not react, the audio crackled at each touch or Q-Link edit, Q-Links sometimes stopped, touches sometimes gave no note, and the Q-Link status pop-up stayed open. Cause not proven. Measured offline: one touch on a hit made 51 display reports, one scroll step 252 (scalaSeq: about 23 for a jump). 1.0.1 draws 32 hits and sends at most 30 reports for each 50 ms pass. Not yet tested on the MPC.
 - 1.0.1 has 1,145 parameters (scalaSeq has 1,298).
-- Not known: if the row labels (Value labels at fixed places) and the per-row playheads draw on the G2.
-- Not known: if the ROW page shows "Row" for the Sel Row knob (WithName and DisableCoarseIncrement together on one control).
-- Not known: if the POOL pads and the ROW row pads (Button widgets; Name labels with WithName for the row numbers) draw and react on the G2. The SDK calls Button well-tested; scalaSeq does not use it.
+- Seen on the MPC One G2 (user photo, 2026-11-24): the row labels draw (the square and the note). The grey row number does not show at the left of the label (not known why: covered by the square, or cut). The row numbers at the right of the roll show. Not checked: the per-row playheads.
+- Seen on the MPC One G2 (user photo, 2026-11-24): the ROW page shows "Row" for the Sel Row knob (WithName and DisableCoarseIncrement together work).
+- Seen on the MPC One G2 (user photo, 2026-11-24): the ROW row pads draw with their numbers, and the selected row is lit. Not checked: a touch on them, and the POOL pads.
+- Not yet seen on the MPC (2026-11-25): the ROW header CHANCE OP CCs with the labels REV CC, OP CC, OP REST, and the POOL header.
+- Not yet seen on the MPC (2026-11-25): the fix for hits seen for a moment while editing on the SEQ page. The desktop test shows no wrong bars between display passes. A scroll, a zoom or a sequence switch still moves most bars and takes several passes (30 reports each 50 ms), so the screen can show a mix of old and new bars for up to a few hundred ms.
+- Q-Links that seem stuck (user, 2026-11-25: on every page, mostly just after a page change, a turn changes nothing for a while; then the knob works): cause unknown. A trace on the MPC (2026-11-25, after the plugin was removed and added again) showed every turn arriving at percSeq at once, on every page tested (HIT, SEQ, CHANCE, LANE, LOCK; 21 parameters, about 1,700 writes), and the user saw no dead knobs in that test. Not proven: that the old Q-Link assignments in the project caused it. If it comes back: note the page and knob and whether the plugin was added again after the update. A desktop sweep (2026-11-25) set each of the 88 Q-Link parameters one step up and down, stopped and playing: all held, except intended limits: Row does not move a hit to a row where it does not fit; Amount stays 0 for an operation without an amount; Clear Ops is a button. Not yet known which page and knob, and whether the project still has the Q-Link assignments from before the 2026-11-24 redesign (remove the plugin and add it again).
 - Not known: the default pad notes of a new drum track, and if the "Chromatic C1" pad note map starts at note 36.
 - CPU on the MPC is not measured. Host simulator (desktop): about 0.5 % of a block with hits in all 16 rows.
 
@@ -81,3 +84,26 @@
 - A kept hit that comes back over a hit you added meanwhile at the same place can overlap it. Not tested.
 - Not tested on the MPC.
 - "+N kept" uses the 66 px "more" label: "+10 kept" and longer can be clipped. Not measured.
+
+## Page and Q-Link redesign (Unreleased, 2026-11-24)
+
+- Measured on the MPC One G2 (user, 2026-11-24): the Q-Link button stops on every column of a page, also on a column with no controls (its 4 knobs then do nothing). The tab bar shows 5 page buttons; the other pages are behind > and <.
+- Seen on the MPC One G2 (user photos, 2026-11-24): the MPC draws an orange "Q" badge at the top-left corner of the active Q-Link frame. It covered the bank title on the SEQ panel and the first letter of the top control on the other pages. The badge size (about 45 x 34 px) is estimated from a photo, not measured. The frames now start 36 px above the top control. Not yet seen on the MPC.
+- Sub-pages (RATE under ROW: push the same page button again) work on the MPC One G2 (user, 2026-11-25). The skin scripts keep a switch (SUBTABS = False) that gives each page its own button.
+- Not tested on the MPC: the LANE drawing knobs (Lane Step, Lane Value), the cursor marker and the STEP / VALUE (or HIT / VEL) controls in column 1 (2026-11-25; before, the knobs worked on the MPC One G2 but had no names on the screen); the short Lock CC fader (a film strip rendered with the SDK kit code, 150 px) with SEND at its right; the taller Snap pads; the CHANCE header strip; the DELETE button.
+- "Clear All Ops" measures 178 px in Titillium Web at 34 px; the switch name box is 170 px. "RATCH" measures 71 px in the 64 px boxes of the SEQ panel and shows in full on the MPC (user photo), so the name probably shows too. Not seen on the MPC.
+- The Q-Link frames do not have the same gap on every side (the validator warns "sits unevenly"): the room above is for the Q badge. On LANE, the frame of column 1 encloses only the settings; knobs 1-2 (Lane Step, Lane Value) have no control on the screen.
+- DELETE has no Q-Link (a knob turn must not delete), so knob 4 of its column does nothing.
+- Host simulator: with some random seeds the state round trip still reports a one-touch button or Range End as not restored (seed 1234: Send Rev CC). By design, as before (see "Ratio rates, locks and lanes").
+- 2026-11-25: the LANE lane has its own x scale (lane x = roll x * 918 / 880, from x 343). Not seen on the MPC.
+
+## Ratchet hits of the selected hit (Unreleased, 2026-11-25)
+
+- Not tested on the MPC. The hits are 292 new markers (4 brightness steps x 8 hits x 9-10 pieces), each a display parameter. Not measured: the display traffic when the selection or RATCH, DUTY or FADE changes (only the markers that move are sent).
+- 4 brightness steps are coarse: with FADE +50 and RATCH 4, hits 2-4 (velocities 21, 5 and 1 %) all show at the dimmest step.
+
+## Performance (Unreleased, 2026-11-25)
+
+- CPU on the MPC is not measured. Desktop, 16 rows of hits: 17 us per block (median). The MPC One G2 is aarch64 (Cortex-A55); the SDK gives no factor for it (its factor of 15-25 is for the 32-bit Cortex-A17). Since 2026-11-25 an idle row ticks once per block; a row with a hit sounding (or with SND NEXT anywhere in the sequence) still ticks every sample, so a dense pattern costs as before (desktop: about 20 us per block). Skipping inside a sounding hit would sum its time differently and could move a gate edge by one sample: not done.
+- Seen on the MPC One G2 (2026-11-25): the MPC cuts a control at the edge of its container (the tall Snap pads ran 19 px below their slot-sized container and were cut in half). Fixed by a taller container. Not known: whether the page itself shows all 628 px; the CHANCE page's bottom faders (moved 17 px down) end at about y 621: not yet seen on the MPC.
+

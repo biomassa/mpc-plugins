@@ -41,14 +41,16 @@ After an update of percSeq, remove it from the track and add it again.
 | Page | What it does |
 |---|---|
 | SEQ | The grid of 16 rows. Draw, move and delete hits. The Q-Link banks are at the right. |
-| LOCK | The 4 lock values of the selected hit, and Lock CC 1-4 of the selected row. |
-| LANE | The velocity of the row's hits, and the 2 CC lanes of the row. Draw the lane values with a finger. |
-| CHANCE | The 4 chance lanes of the selected hit: Op, Prob, PTN, Amount. |
 | HIT | All values of the selected hit, and step entry. |
-| ROW | The selected row: MIDI Note, Velocity, Rev CC, CC Num, CC Rest. 16 pads select the row. |
-| RATE | The timing of the selected row: Rate, Mode, Ratio, Fine, Swing, Direction, Steps, Range Start, Range End. |
-| POOL | 16 pads. A lit pad is in the pool of the sound operations. |
-| SETUP | Sequence, COPY, PASTE, CLEAR, Reset, PTN Count, Pad 1 Note, Out Ch, Group, Steps/Page, Clear Note, Clear All. |
+| CHANCE | The 4 chance lanes of the selected hit: Op, Prob, PTN, Amount. Hit < > and Row < > at the top select the hit. |
+| LANE | The velocity of the row's hits, and the 2 CC lanes of the row. Draw the lane values with a finger or with Q-Link column 1. |
+| LOCK | The 4 lock values of the selected hit, Lock CC 1-4 of the selected row (each with SEND), Hit, Row and Sequence. |
+| ROW | The selected row: MIDI Note, Velocity, and under CHANCE OP CCs the CCs of the SMP REV and CC chance operations: REV CC, OP CC, OP REST (each CC with SEND, for MIDI Learn). 16 pads select the row. Push the ROW button again for RATE. |
+| RATE | The timing of the selected row: Rate, Mode, Ratio, Fine, Steps, Range Start, Range End, Direction, Swing. |
+| POOL | 16 pads under the header ROWS THAT SND+ / SND- / SND? CAN PICK. A lit pad is in the pool of the sound operations. |
+| SETUP | Sequence, COPY, PASTE, CLEAR, Steps/Page, Group, PTN Count, Reset, Pad 1 Note (and LAST PAD), Out Ch, Clear Ops, Clear All Ops. |
+
+The MPC shows 5 page buttons at a time: touch > for the next pages. On every page, each Q-Link column holds one set of controls. The orange frame shows the column that the 4 Q-Links control.
 
 ## Make a pattern
 
@@ -63,13 +65,13 @@ On the SEQ page:
 
 The labels at the left show the row number (grey) and its note (white). The row numbers also show at the right of the grid. Each row shows its current step as a light square and its end as a grey bar.
 
-The Q-Link panel at the right has 4 banks: HIT, SHAPE, ENTRY and VIEW. Tap a value to put the Q-Links on its column. Drag a value up or down to change it. Double-tap a value to open the big editor.
+The Q-Link panel at the right has 4 columns: HIT (Hit, Row, Move, Length), SHAPE (VEL, RATCH, FADE, DUTY), ENTRY (Nudge, Entry Len, Snap, Page) and ROW (Sel Row, Rate, Steps, Sequence). The HIT page has the same first 2 columns. Tap a value to put the Q-Links on its column. Drag a value up or down to change it. Double-tap a value to open the big editor.
 
 With the pads:
 
 1. On the HIT page, set Step Entry to on.
 2. Pad 1 is row 1, pad 16 is row 16. A pad adds a hit at the cursor and moves the cursor by Entry Len.
-3. If the pads do not match the rows, see LAST PAD in the SEQ header while you push pad 1. Set Pad 1 Note (SETUP page) to that value.
+3. If the pads do not match the rows, see LAST PAD (SETUP page, under Pad 1 Note) while you push pad 1. Set Pad 1 Note to that value.
 
 ## Shape the hits
 
@@ -94,6 +96,7 @@ Sound operations play another row of the pool. Put rows in the pool on the POOL 
 
 - LOCK page: set Lock CC 1-4 of the row to CC numbers. Then set the lock values of a hit. The hit sends these CCs just before its note.
 - LANE page: select CC 1 or CC 2. Set CC Num, Steps and Rate. Draw the values with a finger. A red line under the bars shows the current step. The lane sends its CC only when the value changes. When the MPC stops, it sends the Rest value.
+- Draw with the Q-Links: on the LANE page, Q-Link column 1 (left of the lane) has STEP and VALUE. STEP (knob 1, or < >) moves the cursor (a teal column); VALUE (knob 2) sets the value at the cursor. A touch on the lane also moves the cursor. With VEL shown they are HIT (select the hit of the row) and VEL.
 - The CC numbers skip 0-5, 7, 10, 11, 32, 64-68, 98-101 and 120-127. MIDI uses these numbers for other functions.
 
 To connect a CC to a pad parameter of the MPC, use MIDI Learn:
@@ -105,7 +108,7 @@ To connect a CC to a pad parameter of the MPC, use MIDI Learn:
 
 ## Sequences and song arrangement
 
-- There are 32 sequences. Select one with the Sequence knob (VIEW bank or SETUP page).
+- There are 32 sequences. Select one with the Sequence knob (ROW bank, LOCK page or SETUP page).
 - MIDI notes 60-91 on the percSeq track select sequences 1-32. Record these notes in the MPC sequence of the percSeq track to arrange a song.
 - While the MPC plays, a sequence note starts the new sequence at once. The Sequence knob starts it at the next bar line.
 - Reset (SETUP page) starts all rows again every N bars.

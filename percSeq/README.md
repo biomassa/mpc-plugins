@@ -47,6 +47,8 @@ When you make Steps smaller, the hits outside it are kept, not deleted: they com
 
 The Q-Link banks react to touch. Tap a value to select its Q-Link column. Drag up or down on a value to change it. Double-tap a value (or push Enter) to open the big knob editor. Hit, Row, Move, Length and Sel Row have no drag: use the Q-Link or the big knob.
 
+The selected hit is drawn as in the Max roll: a dim teal body with its ratchet hits on top. Each ratchet hit starts at its place in the hit and is DUTY of a ratchet hit long; its brightness (4 steps: 30, 55, 80, 100 %) follows its velocity (VEL with FADE). With RATCH 1 the whole hit is one ratchet hit, its brightness by VEL. The other hits show their ratchets as thin gaps.
+
 Each row is drawn in its own steps: step 3 of a 1/16 row and step 3 of a 1/8T row are in the same column. The current step of each row shows as a light square behind the hits (its playhead). Each row has an end bar (grey) at its Steps.
 
 Touch on the roll (as scalaSeq):
@@ -65,20 +67,22 @@ Other touch areas:
 
 The SEQ page draws up to 32 hits. If more hits are in view, "more" shows at the right end of the ruler; zoom in or flip the page to see them.
 
-The Q-Links (the 4 banks show right of the roll):
+The Q-Links (the 4 banks show right of the roll; the bank names are not shown on the screen). Columns 1-2 are the same on the HIT page:
 
 | Bank | Knob 1 | Knob 2 | Knob 3 | Knob 4 |
 |---|---|---|---|---|
 | HIT | Hit (select, in the selected row) | Row (move the hit to a row) | Move (snap steps) | Length (snap steps) |
 | SHAPE | VEL | RATCH | FADE | DUTY |
-| ENTRY | Entry Len | Snap | Sel Row (select a row) | Rate (of the selected row) |
-| VIEW | Page | Sequence | Steps (of the selected row) | Nudge (-96 to +96 /96 step, from the Move position) |
+| ENTRY | Nudge (-96 to +96 /96 step, from the Move position) | Entry Len | Snap | Page |
+| ROW | Sel Row (select a row; shown as "Sel") | Rate (of the selected row) | Steps (of the selected row) | Sequence |
+
+Program Mode Q-Links (the knobs when they control the plugin, not the screen), one column each: Sequence, Range Start, Range End, Direction / Rate, Swing, Ratio, Fine (of the selected row) / Prob 1-4 / Sel Row, Hit, VEL, RATCH.
 
 With the pads:
 
 1. Set Step Entry to on (HIT page).
 2. Pads 1-16 are rows 1-16. Each pad adds a hit at the cursor in its row, and the cursor moves on by Entry Len. The pads also play the row's note.
-3. If the pads do not match the rows, look at LAST PAD in the header of the SEQ page while you press pad 1, and set Pad 1 Note (SETUP page) to that value. Pad 1 Note cannot be 45-91 (the sequence notes): the knob jumps from 44 to 92.
+3. If the pads do not match the rows, look at LAST PAD (SETUP page, under Pad 1 Note) while you press pad 1, and set Pad 1 Note to that value. Pad 1 Note cannot be 45-91 (the sequence notes): the knob jumps from 44 to 92.
 
 Press Play on the MPC to play the sequence.
 
@@ -130,14 +134,16 @@ MIDI Learn turns off when you leave its page, and it ignores a single CC message
 | Page | Contents |
 |---|---|
 | SEQ | The roll (see above). |
-| LOCK | 4 lock values of the selected hit (off or 0-127) and Lock CC 1-4 of the selected row (off or a CC number). A lock is sent just before its hit's note. Hit < > and Row < >. |
-| LANE | Lane pads VEL / CC 1 / CC 2, Row < >, page < >, FOLLOW. VEL: the velocities of the row's hits. CC 1, CC 2: the row's CC lanes; drag across the bars to draw. Settings: CC Num (off = silent), Steps, Rate, Mode, Ratio, Fine, Direction, Rest (sent at stop). A lane sends its CC only when the value changes. |
-| CHANCE | 4 chance lanes for the selected hit, one column for each lane: Op, Prob, PTN, Amount. |
-| HIT | The selected hit: Hit, Row, Move, Nudge (-96 to +96 /96 step from the Move position, independent of Snap), VEL, RATCH, FADE, DUTY, Length. Step entry: Step Entry, Cursor, Entry Len, Snap, Delete. |
-| ROW | The selected row: Row, MIDI Note, Velocity, Rev CC, CC Num, CC Rest. At the right, 16 row pads (laid out like the MPC pads, row 1 at the bottom left): the lit pad is the selected row; touch a pad to select a row. |
-| RATE | The timing of the selected row: Row < >, Rate, Mode (Musical / Ratio), Ratio and Fine (Ratio mode: the step is Rate divided by Ratio + Fine), Swing, Direction, Steps, Range Start, Range End. |
-| POOL | 16 pads laid out like the MPC pads (row 1 at the bottom left). Each pad shows its row and note. A lit pad is in the pool: the sound operations can pick it. Touch a pad to put it in or out. Q-Link 1-16 = row 1-16. |
-| SETUP | Sequence, COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all percSeq instances), Reset, PTN Count, Pad 1 Note, Out Ch, Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
+| HIT | The selected hit, one column for each set: Hit, Row, Move, Length / VEL, RATCH, FADE, DUTY / Step Entry, Cursor, Snap, Entry Len / Nudge (-96 to +96 /96 step from the Move position, independent of Snap), DELETE. DELETE removes the selected hit (one touch; it has no Q-Link). |
+| CHANCE | Header: Hit < > and Row < > select the hit; HIT and ROW as on the SEQ page. 4 chance lanes for the selected hit, one column for each lane: Op, Prob, PTN, Amount. |
+| LANE | Lane pads VEL / CC 1 / CC 2, Row < >, page < >, FOLLOW. VEL: the velocities of the row's hits. CC 1, CC 2: the row's CC lanes; drag across the bars to draw. The lane starts at Q-Link column 2 and runs to the right edge (918 px). Q-Link column 1, left of the lane: STEP (Lane Step, a < value > control: the cursor, a teal column as wide as the step; a touch on the lane also moves it) and VALUE (Lane Value, a fader: the value at the cursor, 0-127). With VEL shown they are HIT (selects the hit of the row) and VEL (0-127 = 0-100 %). Settings: CC Num, Ratio / Steps, Fine / Rate, Direction / Mode, Rest (sent at stop). A lane sends its CC only when the value changes. |
+| LOCK | 4 lock values of the selected hit (off or 0-127) / Lock CC 1-4 of the selected row (off or a CC number), each with SEND / Hit < >, Row < > / Sequence. A lock is sent just before its hit's note. |
+| ROW | The selected row: Row, MIDI Note, Velocity / CHANCE OP CCs: REV CC (Rev CC), OP CC (CC Num), OP REST (CC Rest), each CC with SEND. These are the CCs of the SMP REV and CC chance operations (see Sound operations). At the right, 16 row pads (laid out like the MPC pads, row 1 at the bottom left): the lit pad is the selected row; touch a pad to select a row. Push the ROW button again for RATE. |
+| RATE | The timing of the selected row: Rate, Mode (Musical / Ratio), Ratio, Fine (Ratio mode: the step is Rate divided by Ratio + Fine) / Steps, Range Start, Range End, Direction / Swing / Row < >. |
+| POOL | Header: ROWS THAT SND+ / SND- / SND? CAN PICK. 16 pads laid out like the MPC pads (row 1 at the bottom left). Each pad shows its row and note. A lit pad is in the pool: the sound operations can pick it. Touch a pad to put it in or out. Q-Link 1-16 = row 1-16. |
+| SETUP | Sequence, COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all percSeq instances) / Steps/Page, Group / PTN Count, Reset / Pad 1 Note (LAST PAD under it), Out Ch, Clear Ops (the chance lanes of the selected hit), Clear All Ops (of all hits; touch twice within 3 s). |
+
+The page order is SEQ, HIT, CHANCE, LANE, LOCK, ROW (RATE), POOL, SETUP. On each page a Q-Link column holds one set of controls ("/" separates the columns above). The orange Q-Link frame starts above the top control, so that the MPC's Q badge does not cover its name (not yet seen on the MPC).
 
 ### Row settings
 
@@ -195,6 +201,9 @@ Reported by the user (2026-11-21, MPC One G2): a CC from a test program on the s
 
 - Each row runs the scalaSeq engine per audio sample. Rows without hits move only their playhead (once per block).
 - Host simulator (desktop): 0.04 % of a block with an empty pattern, about 0.5 % with hits in all 16 rows. Not measured on the MPC.
+- Measured 2026-11-25 (desktop, 128-frame blocks, 4 hits in each of the 16 rows, lanes off, playing): process() median 17 us (0.6 % of a block), p99 35-42 us (was 21 us / 50 us before the 2026-11-25 changes). Not measured on the MPC One G2 (aarch64, Cortex-A55); the SDK gives no factor for this CPU. Most of it is the engine of each row, every sample (profile: Engine::tick and tickRow).
+- 2026-11-25: a row that stays idle for a whole block (no hit sounds, waits or starts, and its step does not change) is ticked once at the block end instead of every sample. Measured on the desktop: 4 short hits per row 17 -> 2.6 us per block (median), p99 about 23 us; a dense pattern (a full-length hit on every step of every row) about 20 us, as before. Not while a hit uses SND NEXT (it reads every row's position). A differential test checks that every message and step is identical to the per-sample path.
+- After a project load the copy for project saving is made on the UI thread (2026-11-25). The audio thread copies the loaded model into place once (reset()), and after an edit only the edited sequence (60.8 KB).
 - All rows run half a step ahead of the song, so that a FLAM grace hit can come before its hit. The hits wait in a queue until the song reaches them.
 
 ## Build and test

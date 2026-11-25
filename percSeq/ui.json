@@ -14,7 +14,11 @@
           "param": "Step Entry",
           "widget": "switch"
         },
-        "empty",
+        {
+          "param": "Nudge",
+          "widget": "fader",
+          "polarity": "bipolar"
+        },
         "empty",
         {
           "param": "RATCH",
@@ -24,10 +28,7 @@
           "param": "Cursor",
           "widget": "fader"
         },
-        {
-          "param": "Delete",
-          "widget": "switch"
-        },
+        "empty",
         "empty",
         {
           "param": "FADE",
@@ -36,58 +37,9 @@
         },
         "empty",
         "empty",
-        {
-          "param": "Nudge",
-          "widget": "fader",
-          "polarity": "bipolar"
-        },
+        "empty",
         {
           "param": "DUTY",
-          "widget": "fader"
-        },
-        "empty",
-        "empty"
-      ]
-    },
-    {
-      "name": "LOCK",
-      "controls": [
-        {
-          "param": "Lock 1",
-          "widget": "fader"
-        },
-        {
-          "param": "Lock CC 1",
-          "widget": "fader"
-        },
-        "empty",
-        "empty",
-        {
-          "param": "Lock 2",
-          "widget": "fader"
-        },
-        {
-          "param": "Lock CC 2",
-          "widget": "fader"
-        },
-        "empty",
-        "empty",
-        {
-          "param": "Lock 3",
-          "widget": "fader"
-        },
-        {
-          "param": "Lock CC 3",
-          "widget": "fader"
-        },
-        "empty",
-        "empty",
-        {
-          "param": "Lock 4",
-          "widget": "fader"
-        },
-        {
-          "param": "Lock CC 4",
           "widget": "fader"
         },
         "empty",
@@ -140,6 +92,88 @@
       ]
     },
     {
+      "name": "LANE",
+      "controls": [
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Lane CC",
+          "widget": "fader"
+        },
+        {
+          "param": "Lane Steps",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Lane Fine",
+          "widget": "fader",
+          "polarity": "bipolar"
+        },
+        "empty",
+        {
+          "param": "Rest",
+          "widget": "fader"
+        }
+      ]
+    },
+    {
+      "name": "LOCK",
+      "controls": [
+        {
+          "param": "Lock 1",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 1",
+          "widget": "fader"
+        },
+        "empty",
+        {
+          "param": "Sequence",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock 2",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 2",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Lock 3",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 3",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Lock 4",
+          "widget": "fader"
+        },
+        {
+          "param": "Lock CC 4",
+          "widget": "fader"
+        },
+        "empty",
+        "empty"
+      ]
+    },
+    {
       "name": "ROW",
       "controls": [
         {
@@ -183,6 +217,29 @@
       "controls": [
         "empty",
         {
+          "param": "Steps",
+          "widget": "fader"
+        },
+        {
+          "param": "Swing",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
+          "param": "Range Start",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Range End",
+          "widget": "fader"
+        },
+        "empty",
+        "empty",
+        {
           "param": "Fine",
           "widget": "fader",
           "polarity": "bipolar",
@@ -191,66 +248,9 @@
             "choice": "Ratio"
           }
         },
-        {
-          "param": "Range Start",
-          "widget": "fader"
-        },
         "empty",
-        "empty",
-        {
-          "param": "Swing",
-          "widget": "fader"
-        },
-        {
-          "param": "Range End",
-          "widget": "fader"
-        },
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        {
-          "param": "Steps",
-          "widget": "fader"
-        },
         "empty",
         "empty"
-      ]
-    },
-    {
-      "name": "LANE",
-      "controls": [
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        "empty",
-        {
-          "param": "Lane CC",
-          "widget": "fader"
-        },
-        {
-          "param": "Lane Steps",
-          "widget": "fader"
-        },
-        "empty",
-        "empty",
-        "empty",
-        {
-          "param": "Lane Fine",
-          "widget": "fader",
-          "polarity": "bipolar"
-        },
-        "empty",
-        {
-          "param": "Rest",
-          "widget": "fader"
-        }
       ]
     },
     {
@@ -260,30 +260,6 @@
           "param": "Sequence",
           "widget": "fader"
         },
-        {
-          "param": "Out Ch",
-          "widget": "fader"
-        },
-        {
-          "param": "Clear Note",
-          "widget": "switch"
-        },
-        "empty",
-        {
-          "param": "Reset",
-          "widget": "fader"
-        },
-        {
-          "param": "Group",
-          "widget": "fader"
-        },
-        {
-          "param": "Clear All",
-          "widget": "switch"
-        },
-        "empty",
-        "empty",
-        "empty",
         "empty",
         "empty",
         {
@@ -291,8 +267,32 @@
           "widget": "fader"
         },
         "empty",
+        {
+          "param": "Group",
+          "widget": "fader"
+        },
+        {
+          "param": "Reset",
+          "widget": "fader"
+        },
+        {
+          "param": "Out Ch",
+          "widget": "fader"
+        },
         "empty",
-        "empty"
+        "empty",
+        "empty",
+        {
+          "param": "Clear Ops",
+          "widget": "switch"
+        },
+        "empty",
+        "empty",
+        "empty",
+        {
+          "param": "Clear All Ops",
+          "widget": "switch"
+        }
       ]
     }
   ]

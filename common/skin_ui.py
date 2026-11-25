@@ -30,6 +30,10 @@ BODY_Y = 52                              # the control under it (fader strip, pa
 PAD_PX, PAD2_PX = 26, 22                 # captions of 1-row and 2-row list pads (pictures)
 OPT_PX, TITLE_PX = 28, 34                # pop-up list options (pictures) and the pop-up title
 ARROW_PX = 34                            # < and > of the step controls (pictures)
+TALL_PAD_H = 36                          # 2026-11-24: Snap pads (2 rows) fill the slot
+TALL_EXTRA = 50 + 2 * TALL_PAD_H + 4 - SLOT_H   # how far tall pads run below the slot (19 px)
+QFRAME_TOP = 36                          # 2026-11-24: a Q-Link frame starts this far above its top control,
+                                         # so the MPC's Q badge (about 45 x 34 px) sits above the name
 # SEQ page Q-Link panel (2026-11-22, user): names 24 px light grey, values 34 px white, bank titles light grey
 SEQ_NAME_PX, SEQ_VALUE_PX, SEQ_LEGEND_C = 24, 34, "ffe8e6df"
 FONT_PATHS = ["/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -148,27 +152,31 @@ class Lists:
         for name, args in self.images.items():
             text_png(os.path.join(self.out, name), *args)
 
-    def pad_list(self, prefix, pidx, choices, k, title=None, visible_when=None, on_colours=None):
+    def pad_list(self, prefix, pidx, choices, k, title=None, visible_when=None, on_colours=None, tall=False):
         """A short list in slot k: header (name) and one pad per choice (one row, or 2 rows of 3 for 6).
-        on_colours: the lit colour of each choice (default amber)."""
+        on_colours: the lit colour of each choice (default amber).
+        tall (2026-11-24, Snap): 2 rows of 36 px pads from y + 50; they run TALL_EXTRA px below the slot, into
+        the gap under it (the container is made that much taller)."""
         x, y = slot_xy(k)
         n = len(choices)
         rows = 2 if n > 4 else 1
         per = (n + rows - 1) // rows
         gap = 6
         w = (248 - gap * (per - 1)) // per
-        h = 44 if rows == 1 else 26
+        h = 44 if rows == 1 else (TALL_PAD_H if tall else 26)
         out = _header(prefix, pidx, k, value=False, title=title)
         for i, c in enumerate(choices):
             r, col = divmod(i, per)
             lit = on_colours[i] if on_colours else ON_C
             tag = "" if lit == ON_C else "_%02x%02x%02x" % lit
-            bx, by = x + 15 + col * (w + gap), y + BODY_Y + r * (h + 2)
+            bx, by = x + 15 + col * (w + gap), (y + 50 + r * (h + 4)) if tall else (y + BODY_Y + r * (h + 2))
             px = PAD_PX if rows == 1 else PAD2_PX
             on = self._img(f"pad_{w}x{h}_{i}_{c}_on{tag}".replace("/", "-").replace(" ", "_"), w, h, c, lit, DARK_C, px)
             off = self._img(f"pad_{w}x{h}_{i}_{c}_off".replace("/", "-").replace(" ", "_"), w, h, c, OFF_C, (0xe4, 0xe4, 0xe6), px)
             out.append(_button(f"{prefix}_{i}", f"Parameter {pidx}", on, off, i, n, f"{bx} {by} {w} {h}"))
-        return self._container(f"{self.tag}_{prefix}", out, f"{x} {y} {SLOT_W} {SLOT_H}", visible_when)
+        # 2026-11-25: the container is as tall as the pads (the MPC cuts a child at its container's edge; seen
+        # on the MPC One G2: the second row of the tall Snap pads was cut in half)
+        return self._container(f"{self.tag}_{prefix}", out, f"{x} {y} {SLOT_W} {SLOT_H + (TALL_EXTRA if tall else 0)}", visible_when)
 
     def popup_field(self, prefix, pidx, list_id, k, title=None, visible_when=None):
         """The field in slot k: name, a box with the current choice, and a clear button that opens the list."""
@@ -257,7 +265,7 @@ class Lists:
         e["bounds"]["acceptsHWFocus"] = "Yes"
         return e
 
-    def step_control(self, prefix, pidx, prev_idx, next_idx, k, title=None):
+    def step_control(self, prefix, pidx, prev_idx, next_idx, k, title=None, visible_when=None):
         """A < value > control in slot k: the name on top, then a < button, the value and a > button.
         The buttons are momentary parameters (prev_idx, next_idx) that the plugin acts on and sets back to 0.
         Used where the plugin limits the value (a fader handle would spring back)."""
@@ -270,7 +278,7 @@ class Lists:
         out.append(_label(f"{prefix}_value", f"Parameter {pidx}", "Value", f"{x + 15 + bw} {y + BODY_Y} {248 - 2 * bw} {bh}",
                           VALUE_PX, "ffffffff", "horizontallyCentred verticallyCentred"))
         out.append(_button(f"{prefix}_next", f"Parameter {next_idx}", gt, gt, 1, 1, f"{x + 263 - bw} {y + BODY_Y} {bw} {bh}"))
-        return self._container(f"{self.tag}_{prefix}", out, f"{x} {y} {SLOT_W} {SLOT_H}")
+        return self._container(f"{self.tag}_{prefix}", out, f"{x} {y} {SLOT_W} {SLOT_H}", visible_when)
 
 
 def enlarge_kit(head):
@@ -346,3 +354,39 @@ def set_qlink(qlinks, tab_number, k, pidx):
     for m in qlinks["Screen Mode Q-Links"]["map"]:
         if m["Tab"] == tab_number:
             m["Q-Links"][f"Q-Link {qlink_of_slot(k)}"] = pidx
+
+
+def shift_tab(tab, dy):
+    """2026-11-24: move every control of a tab dy px down (the CHANCE header strip)."""
+    for e in tab["componentDefinition"]["componentsData"]:
+        b = e["bounds"]
+        if b.get("boundsType") == "Absolute":
+            x, y, w, h = b["bounds"].split()
+            b["bounds"] = f"{x} {float(y) + dy:g} {w} {h}"
+
+
+def short_fader_definition(head, width):
+    """2026-11-24: a copy of the generated faderUni component ('faderUniShort') whose strip is width px long
+    (fader_h_uni_short.png); the name / value header stays full width."""
+    key = '"key": "faderUni"'
+    i = head.index(key)
+    start = head.rindex("{", 0, i)
+    depth, j = 0, start
+    while True:
+        ch = head[j]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == '"':
+            j += 1
+            while head[j] != '"':
+                j += 2 if head[j] == "\\" else 1
+        j += 1
+    block = head[start:j + 1]
+    short = block.replace(key, '"key": "faderUniShort"').replace('"fader_h_uni.png"', '"fader_h_uni_short.png"')
+    short = short.replace('"bounds": "15 54 248 36"', f'"bounds": "15 54 {width} 36"')
+    assert short.count("fader_h_uni_short.png") == 1 and short.count(f"15 54 {width} 36") == 1
+    return head[:j + 1] + ",\n" + short + head[j + 1:]

@@ -4,6 +4,7 @@
 #include "../src/PercSeq.cpp"
 
 #include <cstdio>
+#include <set>
 
 static int g_fail = 0;
 #define CHECK(c, ...) do { if (!(c)) { ++g_fail; std::printf("FAIL %s:%d: ", __FILE__, __LINE__); std::printf(__VA_ARGS__); std::printf("\n"); } } while (0)
@@ -395,7 +396,10 @@ int main()
         p.set(kSelRow, 1); p.set(kLaneSel, 0);
         play(p, 0.3, 0.35);
         CHECK(p.testComputed(kLnPlayX0 + 1) > 0.0f, "VEL lane playhead shown");
-        CHECK(std::fabs(p.testComputed(kLnPlayX0 + 1) - p.testComputed(kCellX0 + 1)) < 1e-6f, "at the row's step");
+        // 2026-11-25: the lane is its own x scale (lane x = roll x * kLK, from Q-Link column 2)
+        const float rollLeft = p.testComputed(kCellX0 + 1) * (kOFF + kGW) - kOFF;
+        const float want = (rollLeft * kLK + kOFF) / (kOFF + kLW);
+        CHECK(std::fabs(p.testComputed(kLnPlayX0 + 1) - want) < 1e-5f, "at the row's step (%f, want %f)", p.testComputed(kLnPlayX0 + 1), want);
         p.set(kSelRow, oldRow + 1); block(p, {}, 0.35);
     }
     stop(p);
@@ -754,6 +758,162 @@ int main()
         CHECK(cc == 0, "SEND sends nothing while the CC is off (%d)", cc);
     }
 
+    // ---- 2026-11-24: LANE drawing knobs (CC lane: step and value; VEL: hit and VEL) and the cursor marker
+    {
+        PercSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(kFr); u.internalResume();
+        waitWorker(); block(u, {});
+        clearSeq(u);
+        addHit(u, 0, 0); addHit(u, 0, 2);
+        Row& w = u.testModel().seqs[0].rows[0];
+        w.hits[1].v = 0.5f;
+        w.lane[0].steps = 8; w.lane[0].val[3] = 20;
+        rebuild(u); block(u, {});
+        u.set(kLaneSel, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 1, "CC lane: Lane Step starts at step 1 (%f)", u.get(kLnStep));
+        u.set(kLnStep, 4); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnValue)) == 20, "Lane Step 4 shows the value of step 4 (%f)", u.get(kLnValue));
+        u.set(kLnNext, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 5 && u.get(kLnNext) == 0, "> moves Lane Step to 5 and goes off (%f)", u.get(kLnStep));
+        u.set(kLnPrev, 1); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 4, "< moves Lane Step back to 4 (%f)", u.get(kLnStep));
+        bool shown = false;
+        for (int k = 0; k < kZoomN; ++k) shown = shown || u.get(kLnCurX0 + k) > 0;
+        CHECK(shown, "the cursor marker shows");
+        u.set(kLnValue, 99); block(u, {}); block(u, {});
+        CHECK(w.lane[0].val[3] == 99, "Lane Value sets the value at the cursor (%d)", w.lane[0].val[3]);
+        u.set(kLnStep, 20); block(u, {}); block(u, {});
+        CHECK((int)std::lround(u.get(kLnStep)) == 8, "Lane Step stops at the lane's Steps (%f)", u.get(kLnStep));
+        u.set(kLaneSel, 0); block(u, {}); block(u, {});
+        shown = false;
+        for (int k = 0; k < kZoomN; ++k) shown = shown || u.get(kLnCurX0 + k) > 0;
+        CHECK(!shown, "no cursor marker on the VEL lane");
+        u.set(kLnStep, 2); block(u, {}); block(u, {});
+        CHECK(u.testSel() == 1, "VEL lane: Lane Step selects hit 2 (%d)", u.testSel());
+        CHECK((int)std::lround(u.get(kLnValue)) == 64, "VEL lane: Lane Value shows VEL 50 %% as 64 (%f)", u.get(kLnValue));
+        u.set(kLnValue, 127); block(u, {}); block(u, {});
+        CHECK(std::fabs(w.hits[1].v - 1.0f) < 1e-4f, "VEL lane: Lane Value 127 sets VEL 100 %% (%f)", w.hits[1].v);
+    }
+
+    // ---- 2026-11-25: idle rows tick once per block (performance). Differential test: the same random
+    // patterns, events and transport in two instances, one forced to the per-sample path; every queued
+    // message (time, type, note, value) and every step change must be identical.
+    {
+        struct Run { int frames; double sr, bpm; int swing; bool sndNext; uint32_t seed; };
+        const Run runs[] = {{128, 44100, 120, 50, false, 1}, {128, 44100, 133, 62, false, 2}, {32, 48000, 97, 75, false, 3},
+                            {512, 44100, 140, 50, false, 4}, {128, 44100, 120, 66, true, 5}, {64, 48000, 180, 58, false, 6},
+                            {128, 44100, 75, 75, false, 7}, {256, 44100, 120, 50, false, 8}};
+        int totalEmits = 0;
+        for (const Run& R : runs)
+        {
+            PercSeq a, b;
+            b.testNoSkip = true;
+            for (PercSeq* p : {&a, &b}) { p->internalSetSampleRate(R.sr); p->internalSetBlockSize(R.frames); p->internalResume(); }
+            waitWorker();
+            uint32_t rs = R.seed * 2654435761u + 1;
+            auto rnd = [&](int n) { rs ^= rs << 13; rs ^= rs >> 17; rs ^= rs << 5; return (int)(rs % (uint32_t)n); };
+            for (int s = 0; s < 2; ++s)
+                for (int r = 0; r < kRows; ++r)
+                {
+                    Row w; w.note = 36 + r; w.revCC = 102 + r; w.ccNum = 14 + r;
+                    w.steps = 1 + rnd(16); w.rStart = rnd(w.steps); w.rEnd = w.rStart + rnd(w.steps - w.rStart);
+                    w.swing = (float)R.swing; w.rate = rnd(15); w.dir = rnd(3);
+                    if (rnd(4) == 0) { w.mode = 1; w.ratio = rnd(15); w.fine = rnd(21) - 10; }
+                    const int nh = rnd(5);
+                    for (int k = 0; k < nh; ++k)
+                    {
+                        Hit h; h.st = rnd(w.steps * 4) / 4.0f; h.len = (1 + rnd(8)) / 4.0f; h.v = (20 + rnd(81)) / 100.0f;
+                        h.r = (int8_t)(1 + rnd(8)); h.d = (5 + rnd(91)) / 100.0f; h.fd = (int8_t)(rnd(101) - 50);
+                        for (int l = 0; l < kLanes; ++l)
+                            if (rnd(3) == 0)
+                            {
+                                int op = 1 + rnd(kNumOps - 1);
+                                if (op == O_SNDNEXT && !R.sndNext) op = O_FLAM;
+                                h.ch[l].op = (uint8_t)op; h.ch[l].prob = (30 + rnd(71)) / 100.0f;
+                                h.ch[l].ptn = (uint8_t)rnd(4); h.ch[l].amt = (uint8_t)rnd(5);
+                            }
+                        w.insert(h);
+                    }
+                    if (R.sndNext && r == 3 && w.count > 0) w.hits[0].ch[0].op = O_SNDNEXT;
+                    a.testModel().seqs[s].rows[r] = w; b.testModel().seqs[s].rows[r] = w;
+                }
+            for (PercSeq* p : {&a, &b}) { p->internalResume(); }
+            const double qps = R.bpm / 60.0 / R.sr;
+            double ppq = 0;
+            auto blk = [&](PercSeq& p, double q, std::vector<mpc::MidiEvent> ev) {
+                static float l[512], rr[512];
+                float* outs[2] = {l, rr};
+                mpc::ProcessContext ctx;
+                ctx.outputs = outs; ctx.numOutputs = 2; ctx.numFrames = R.frames; ctx.sampleRate = R.sr;
+                ctx.midi = ev.data(); ctx.numMidiEvents = (int)ev.size();
+                ctx.transport.valid = ctx.transport.playing = ctx.transport.ppqValid = ctx.transport.tempoValid = true;
+                ctx.transport.bpm = R.bpm; ctx.transport.ppqPos = q; ctx.transport.timeSigNumerator = 4; ctx.transport.timeSigDenominator = 4;
+                p.process(ctx);
+            };
+            const int blocks = (int)(40.0 * R.sr / R.frames);   // 40 s
+            for (int k = 0; k < blocks; ++k)
+            {
+                std::vector<mpc::MidiEvent> ev;
+                if (k == blocks / 5) ev.push_back(mpc::MidiEvent::noteOn(R.frames / 2, kSeqNote0 + 1, 100));   // sequence note
+                if (k == blocks / 4) for (PercSeq* p : {&a, &b}) p->set(kReset, 2);                          // Reset every 2 bars
+                if (k == blocks / 3) for (PercSeq* p : {&a, &b}) p->set(kOn0 + 5, 0);                        // a row off
+                if (k == blocks / 3 + 300) for (PercSeq* p : {&a, &b}) p->set(kOn0 + 5, 1);                  // and on again
+                if (k == blocks / 2) for (PercSeq* p : {&a, &b}) p->set(kSequence, 1);                       // Sequence knob
+                if (k == 2 * blocks / 3) ppq += 3.7;                                                         // a jump
+                blk(a, ppq, ev); blk(b, ppq, ev);
+                ppq += R.frames * qps;
+            }
+            bool same = a.testEmits_.size() == b.testEmits_.size() && a.testSteps_.size() == b.testSteps_.size();
+            for (size_t i = 0; same && i < a.testEmits_.size(); ++i)
+            {
+                const auto &x = a.testEmits_[i], &y = b.testEmits_[i];
+                same = x.t == y.t && x.at == y.at && x.type == y.type && x.a == y.a && x.b == y.b;
+            }
+            for (size_t i = 0; same && i < a.testSteps_.size(); ++i)
+                same = a.testSteps_[i].t == b.testSteps_[i].t && a.testSteps_[i].row == b.testSteps_[i].row && a.testSteps_[i].step == b.testSteps_[i].step;
+            CHECK(same, "idle skip = per sample (frames %d, %.0f Hz, %.0f bpm, swing %d%s): %zu/%zu messages, %zu/%zu steps",
+                  R.frames, R.sr, R.bpm, R.swing, R.sndNext ? ", SND NEXT" : "", a.testEmits_.size(), b.testEmits_.size(),
+                  a.testSteps_.size(), b.testSteps_.size());
+            if (R.sndNext) CHECK(a.testSkips == 0, "no skip while SND NEXT is used (%ld)", a.testSkips);
+            else CHECK(a.testSkips > blocks, "rows were skipped (%ld row-blocks of %d blocks)", a.testSkips, blocks);
+            std::printf("  idle skip: frames %d, swing %d%s: %ld of %d row-blocks skipped, %zu messages\n", R.frames, R.swing,
+                        R.sndNext ? ", SND NEXT" : "", a.testSkips, blocks * kRows, a.testEmits_.size());
+            totalEmits += (int)a.testEmits_.size();
+            a.internalSuspend(); b.internalSuspend();
+        }
+        CHECK(totalEmits > 5000, "the differential test played enough messages (%d)", totalEmits);
+    }
+
+    // ---- 2026-11-25: the selected hit's ratchet hits (DUTY widths, brightness steps by VEL x FADE)
+    {
+        PercSeq u;
+        u.internalSetSampleRate(48000); u.internalSetBlockSize(kFr); u.internalResume();
+        waitWorker(); block(u, {});
+        clearSeq(u);
+        addHit(u, 0, 0, 4);
+        Row& w = u.testModel().seqs[0].rows[0];
+        w.hits[0].r = 4; w.hits[0].d = 0.5f; w.hits[0].v = 1.0f; w.hits[0].fd = 0;
+        rebuild(u); block(u, {});
+        u.set(kHitSel, 1); block(u, {}); block(u, {});
+        auto shownAt = [&](int lv, int k) {
+            bool any = false;
+            for (int pc = 0; pc < hitPieces(k); ++pc) any = any || u.get(kRHitX0 + lv * kHitSet + hitOffset(k) + pc) > 0;
+            return any;
+        };
+        bool ok = true;
+        for (int k = 0; k < 8; ++k)
+            for (int lv = 0; lv < kHitLevels; ++lv) ok = ok && shownAt(lv, k) == (k < 4 && lv == 3);
+        CHECK(ok, "RATCH 4, VEL 100 %%: 4 ratchet hits at the brightest step, nothing else");
+        const float stepPx = kGW / 8;   // Steps/Page 8 (default)
+        const float left1 = u.get(kRHitX0 + 3 * kHitSet + hitOffset(1) + 5) * (kOFF + kGW) - kOFF;   // the 32 px piece of hit 2
+        CHECK(std::fabs(left1 - stepPx) < 1.0f, "ratchet hit 2 starts at step 2 (%f, want %f)", left1, stepPx);
+        CHECK(u.get(kRHitX0 + 3 * kHitSet + hitOffset(1) + 6) == 0, "ratchet hit 2 is half a step wide (DUTY 0.5): no 64 px piece");
+        u.set(kFade, 50); block(u, {}); block(u, {});
+        CHECK(shownAt(3, 0) && shownAt(0, 3) && !shownAt(3, 3), "FADE +50: ratchet hit 1 brightest, hit 4 at the dimmest step");
+        u.set(kRatch, 1); block(u, {}); block(u, {});
+        CHECK(shownAt(3, 0) && !shownAt(3, 1), "RATCH 1: one ratchet hit over the whole hit, brightness by VEL");
+    }
+
     // ---- 2026-11-22: a Range End at the last step follows Steps; one inside stays
     {
         PercSeq u;
@@ -826,6 +986,86 @@ int main()
         w.lane[0].val[9] = 99;
         u.set(kLaneSel, 1); block(u, {}); u.set(kLnSteps, 1); block(u, {}); u.set(kLnSteps, 16); block(u, {});
         CHECK(w.lane[0].val[9] == 99 && w.lane[0].steps == 16, "CC lane values survive Lane Steps 16 -> 1 -> 16");
+    }
+    // ---- 2026-11-25: a hit edit on the roll draws no phantom bars between the display passes. The test
+    // runs the passes by hand (kMaxNotify reports each, as on the MPC) and keeps the values that each
+    // pass reports, as the screen does; every frame between "before" and "after" must show only bars
+    // of "before" or "after", and every bar that is in both.
+    {
+        PercSeq v;
+        v.prepare(48000, 512);
+        v.testHoldNotify.store(true);
+        waitWorker();
+        auto& sq = v.testModel().seqs[0];
+        for (int r = 0; r < 8; ++r)
+            for (int k = 0; k < 4; ++k) { if (r == 1 && k == 1) continue; Hit h; h.st = k * 2 + 0.5f; h.len = 1; sq.rows[r].insert(h); }
+        rebuild(v);
+        for (int i = 0; i < 4; ++i) block(v, {});
+        std::vector<float> scr(kNumParams);
+        while (v.testPending()) v.testNotifyPass();
+        for (int i = 0; i < kNumParams; ++i) scr[i] = v.getNormalised(i);
+        auto bars = [&]() {
+            std::set<std::vector<float>> b;
+            for (int j = 0; j < kShown; ++j)
+            {
+                std::vector<float> g{scr[kHitY0 + j]};
+                bool vis = false;
+                for (int k = 0; k < kPieces; ++k) { g.push_back(scr[kPieceX0 + j * kPieces + k]); vis |= scr[kPieceX0 + j * kPieces + k] != 0; }
+                if (vis) b.insert(g);
+            }
+            return b;
+        };
+        auto pv = [](float px, float pad) { return std::max(0.0f, std::min(1.0f, (px - 1) / (pad - 2))); };
+        const float z = (float)(8 << v.getInt(kZoom));
+        auto X = [&](float st) { return pv(st / z * kGW, kGW); };
+        auto Y = [&](int r) { return pv((r + 0.5f) * kRowH, kGH); };
+        auto frames = [&](const char* what, int maxReports) {
+            const auto before = bars();
+            std::vector<std::set<std::vector<float>>> fr;
+            const int n = v.testPending();
+            while (v.testPending())
+            {
+                v.testSent.clear();
+                v.testNotifyPass();
+                for (int i : v.testSent) scr[i] = v.getNormalised(i);
+                fr.push_back(bars());
+            }
+            const auto after = fr.empty() ? before : fr.back();
+            int bad = 0;
+            for (auto& f : fr)
+            {
+                for (auto& g : f) if (!before.count(g) && !after.count(g)) ++bad;
+                for (auto& g : before) if (after.count(g) && !f.count(g)) ++bad;
+            }
+            CHECK(bad == 0, "%s: no phantom or missing bars between passes: %d (%d reports)", what, bad, n);
+            CHECK(n <= maxReports, "%s: at most %d reports: %d", what, maxReports, n);
+        };
+        auto press = [&](float st, int r) { v.set(kRollTX, X(st)); v.set(kRollTX + 1, Y(r)); block(v, {}); block(v, {}); };
+        auto lift = [&]() { v.set(kRollTX, 0); block(v, {}); v.set(kRollTX + 1, 0); block(v, {}); block(v, {}); };
+        press(2.6f, 1); lift();
+        CHECK(sq.rows[1].count == 4, "frames: the tap adds a hit in row 2: %d", sq.rows[1].count);
+        frames("new hit", 60);
+        press(3.3f, 1); lift(); frames("select", 60);
+        press(3.3f, 1); lift();
+        CHECK(sq.rows[1].count == 3, "frames: the double tap deletes it: %d", sq.rows[1].count);
+        frames("delete", 60);
+        press(0.7f, 1); frames("press a hit", 60);
+        v.set(kRollTX, X(1.7f)); block(v, {}); block(v, {}); frames("drag right", 60);
+        v.set(kRollTX + 1, Y(10)); block(v, {}); block(v, {});
+        CHECK(sq.rows[10].count == 1 && sq.rows[1].count == 2, "frames: the drag moves the hit to row 11: %d", sq.rows[10].count);
+        frames("drag to another row", 90);
+        lift(); frames("lift", 60);
+        // the same with every start position of the display pass (on the MPC it is wherever the last pass stopped)
+        int badStarts = 0;
+        for (int c = 0; c < kNumParams; ++c)
+        {
+            const int f0 = g_fail;
+            v.testSetCursor(c); press(5.3f, 12); lift(); v.testSetCursor(c); frames("new hit (any pass start)", 60);
+            press(5.3f, 12); lift(); v.testSetCursor(c); frames("select (any pass start)", 60);
+            press(5.3f, 12); lift(); v.testSetCursor(c); frames("delete (any pass start)", 60);
+            if (g_fail != f0) { ++badStarts; if (badStarts > 3) break; }
+        }
+        CHECK(badStarts == 0 && sq.rows[12].count == 0, "frames: every pass start: %d bad, row 13 hits %d", badStarts, sq.rows[12].count);
     }
     std::printf(g_fail ? "%d FAILED\n" : "all plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;

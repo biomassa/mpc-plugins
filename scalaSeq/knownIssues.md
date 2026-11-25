@@ -138,3 +138,27 @@
 - A kept note that comes back over a note you added meanwhile at the same place can overlap it. Not tested.
 - Not tested on the MPC.
 - Host simulator, seed 99: the state round trip sometimes reports the Row Line display values (2 of 26 runs; the 2.8.0 build: 0 of 26), and the re-saved chunk differs from the first (same size). The Row Lines are display positions that the plugin computes. The cause is not known: the kept notes, the Range End rule or the Kept Text parameter. To find out: run seed 99 50 times with each change switched off in turn.
+
+## Page and Q-Link redesign (Unreleased, 2026-11-24)
+
+- Measured on the MPC One G2 (user, 2026-11-24): the Q-Link button stops on every column of a page, also on a column with no controls (its 4 knobs then do nothing). The tab bar shows 5 page buttons; the other pages are behind > and <.
+- Seen on the MPC One G2 (user photos, 2026-11-24): the MPC draws an orange "Q" badge at the top-left corner of the active Q-Link frame. It covered the bank title on the SEQ panel and the first letter of the top control on the other pages. The badge size (about 45 x 34 px) is estimated from a photo, not measured. The frames now start 36 px above the top control. Not yet seen on the MPC.
+- Sub-pages (MASK 2 under MASK: push the same page button again) work on the MPC One G2 (user, 2026-11-25). The skin scripts keep a switch (SUBTABS = False) that gives each page its own button.
+- Not tested on the MPC: the LANE drawing knobs (Lane Step, Lane Value), the cursor marker and the STEP / VALUE (or NOTE / VEL) controls in column 1 (2026-11-25; before, the knobs worked on the MPC One G2 but had no names on the screen); the short Lock CC fader (a film strip rendered with the SDK kit code, 150 px) with SEND at its right; the taller Snap pads; the CHANCE header strip; the DELETE button.
+- "Clear All Ops" measures 178 px in Titillium Web at 34 px; the switch name box is 170 px. "RATCH" measures 71 px in the 64 px boxes of the SEQ panel and shows in full on the MPC (user photo), so the name probably shows too. Not seen on the MPC.
+- The Q-Link frames do not have the same gap on every side (the validator warns "sits unevenly"): the room above is for the Q badge. On LANE, the frame of column 1 encloses only the settings; knobs 1-2 (Lane Step, Lane Value) have no control on the screen.
+- DELETE has no Q-Link (a knob turn must not delete), so knob 4 of its column does nothing.
+- Host simulator, seed 1 (measured 2026-11-25): the state round trip sometimes reports View Low and the Row Line display values. The last commit before the redesign: 4 of 12 runs; this version: 1 of 12. Not caused by the redesign.
+- 2026-11-25: the LANE lane has its own x scale (lane x = roll x * 918 / 880, from x 343). Not seen on the MPC.
+
+## Ratchet hits of the selected note (Unreleased, 2026-11-25)
+
+- Not tested on the MPC. The hits are 292 new markers (4 brightness steps x 8 hits x 9-10 pieces), each a display parameter. Not measured: the display traffic when the selection or RATCH, DUTY or FADE changes (only the markers that move are sent).
+- 4 brightness steps are coarse: with FADE +50 and RATCH 4, hits 2-4 (velocities 21, 5 and 1 %) all show at the dimmest step.
+
+## Performance (Unreleased, 2026-11-25)
+
+- Host simulator with --playing, seed 1234: the state round trip reports Play X (the playhead marker): the plugin writes it every block while playing. The same before the 2026-11-25 changes (checked with that build). By design.
+- CPU on the MPC is not measured. The numbers in the README are from the desktop.
+- Seen on the MPC One G2 (2026-11-25): the MPC cuts a control at the edge of its container (the tall Snap pads ran 19 px below their slot-sized container and were cut in half). Fixed by a taller container. Not known: whether the page itself shows all 628 px; the CHANCE page's bottom faders (moved 17 px down) end at about y 621: not yet seen on the MPC.
+

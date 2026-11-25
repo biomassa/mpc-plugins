@@ -65,16 +65,18 @@ Other touch areas:
 - Degree labels at the left: drag up or down to scroll the rows.
 - Velocity lane: drag a note's bar up or down to set its velocity.
 
-Marks on the notes: thin gaps where the ratchets (RATCH) fall, a ramp for a note with GLIDE, a ring for a note with a chance operation. The selected note is green. The chance lanes of the selected note show as text under the FREE button; Clear Note and Clear All (SETUP page) remove them.
+Marks on the notes: thin gaps where the ratchets (RATCH) fall, a ramp for a note with GLIDE, a ring for a note with a chance operation. The selected note is green, drawn as in the Max roll: a dim body with its ratchet hits on top. Each hit starts at its place in the note and is DUTY of a hit long; its brightness (4 steps: 30, 55, 80, 100 %) follows its velocity (VEL with FADE). With RATCH 1 the whole note is one hit, its brightness by VEL. The chance lanes of the selected note show as text under the FREE button; Clear Ops and Clear All Ops (SETUP page) remove them.
 
-The Q-Links (the 4 banks show right of the roll):
+The Q-Links (the 4 banks show right of the roll; the bank names are not shown on the screen). Columns 1-3 are the same on the NOTE page:
 
 | Bank | Knob 1 | Knob 2 | Knob 3 | Knob 4 |
 |---|---|---|---|---|
-| NOTE | Note (select, 1-64) | Degree (in the period) | Period (-4 to +4) | Move (0-63 snap steps) |
-| SHAPE | Length (1-64 snap steps) | VEL | GLIDE | RATCH |
-| RATCH | FADE | DUTY | Entry Len | Snap |
-| VIEW | View Low (rows, -32 to +31) | View Start (step 1-64) | Sequence (1-32) | Nudge (1/96 step, -32 to +31) |
+| PITCH | Note (select, 1-64) | Degree (in the period) | Period (-4 to +4) | GLIDE |
+| TIME | Move (0-63 snap steps) | Length (1-64 snap steps) | Nudge (1/96 step, -32 to +31) | Entry Len |
+| SHAPE | VEL | RATCH | FADE | DUTY |
+| VIEW | View Low (rows, -32 to +31) | View Start (step 1-64) | Sequence (1-32) | Snap |
+
+Program Mode Q-Links (the knobs when they control the plugin, not the screen), one column each: Sequence, Range Start, Range End, Direction / Rate, Swing, Ratio, Fine / Prob 1-4 / VEL, RATCH, GLIDE, Nudge (of the selected note).
 
 - Note: past the last note, the knob stays on the last note.
 - Degree: the full knob turn covers the degrees of the scale mask in the period. Period moves the note by whole periods.
@@ -85,10 +87,10 @@ With the pads:
 
 1. Set Step Entry to on (NOTE page).
 2. Pads 1-16 are the 16 visible rows: pad 1 is the bottom row. Each pad adds a note at the cursor, and the cursor moves on by Entry Len. The pads also play the note.
-3. If the pads do not match the rows, look at LAST PAD in the header of the SEQ page while you press pad 1, and set Pad 1 Note (SETUP page) to that value.
+3. If the pads do not match the rows, look at LAST PAD (SETUP page, under Pad 1 Note) while you press pad 1, and set Pad 1 Note to that value.
 4. Pad 1 Note cannot be 45-91, because the rows must not overlap the sequence notes (60-91). The knob jumps from 44 to 92. If pad 1 sends a note in this range, change the pad notes on the MPC.
 
-On the NOTE page, select a note with Note and change it with Degree, Period, Move, Length, Nudge and the lanes. Delete removes the selected note.
+On the NOTE page, select a note with Note and change it with Degree, Period, Move, Length, Nudge and the lanes. DELETE (a button) removes the selected note.
 
 Press Play on the MPC to play the sequence.
 
@@ -137,14 +139,16 @@ MIDI Learn turns off when you leave its page, and it ignores a single CC message
 | Page | Contents |
 |---|---|
 | SEQ | The piano roll (see above). |
-| NOTE | The selected note: Note, Degree, Period, Move, Length, Nudge, VEL, GLIDE, RATCH, FADE, DUTY. Step entry: Cursor, Entry Len, Snap, Step Entry, Delete. |
-| CHANCE | 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. The lanes run in order 1-4; UNMUTE and UNSKIP undo an earlier lane's MUTE or SKIP (for example MUTE 100 % + UNMUTE 50 % on PTN 1:4). GLIDE (Amount = share of the note) and NO GLIDE switch the glide for one hit. DELAY delays a hit by 1/16 .. 1 step, DELAY % by 1-100 % of a step. |
-| LOCK | 4 lock values of the selected note (off or 0-127) and Lock CC 1-4 of the sequence. A lock is sent just before its note, on First Ch. Note < >. |
-| RATE | Rate, Mode (Musical / Ratio), Ratio and Fine (Ratio mode: the step is Rate divided by Ratio + Fine), Swing, Direction, Steps, Range Start, Range End. Mode, Ratio and Fine are per sequence. |
-| LANE | Lane pads VEL / CC 1 / CC 2. The lane shows the SEQ view; each step is a thin bar; drag across to draw. Settings of CC 1 and CC 2 (per sequence): CC Num (off = silent), Steps, Rate, Mode, Ratio, Fine, Direction, Rest (sent at stop). CCs go out on First Ch. |
-| SETUP | Sequence (1-32), COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all scalaSeq instances), PTN Count, Velocity, Pad 1 Note (0-44 or 92-127), Group, Steps/Page, Clear Note, Clear All (touch twice within 3 s). |
-| OUTPUT | Scale, Root, Root Tune, Out Ch, Voices, Bend Up, Bend Down, Curve. |
-| MASK, MASK 2 | Pads laid out like the MPC pads, one for each scale degree: MASK has degrees 0-15 (degree 0 at the bottom left), MASK 2 has degrees 16-30. A lit pad (amber frame) is in the scale mask. Touch a pad to put it in or out. Q-Link n is the pad at the same place. |
+| NOTE | The selected note, one column for each set: Note, Degree, Period, GLIDE / Move, Length, Nudge, DELETE / VEL, RATCH, FADE, DUTY / Step Entry, Cursor, Snap, Entry Len. DELETE removes the selected note (one touch; it has no Q-Link). |
+| CHANCE | Header: < > select the note; NOTE and DEG as on the SEQ page. 4 chance lanes for the selected note, one column for each lane: Op, Prob, PTN, Amount. The lanes run in order 1-4; UNMUTE and UNSKIP undo an earlier lane's MUTE or SKIP (for example MUTE 100 % + UNMUTE 50 % on PTN 1:4). GLIDE (Amount = share of the note) and NO GLIDE switch the glide for one hit. DELAY delays a hit by 1/16 .. 1 step, DELAY % by 1-100 % of a step. |
+| LANE | Lane pads VEL / CC 1 / CC 2. The lane starts at Q-Link column 2 and runs to the right edge (918 px); it shows the SEQ view (View Start, Steps/Page); each step is a thin bar; drag across to draw. Q-Link column 1, left of the lane: STEP (Lane Step, a < value > control: the cursor, a teal column; a touch on the lane also moves it) and VALUE (Lane Value, a fader: the value at the cursor, 0-127). With VEL shown they are NOTE (selects the note) and VEL (0-127 = 0-100 %). Settings of CC 1 and CC 2 (per sequence): CC Num (off = silent), Ratio / Steps, Fine / Rate, Direction / Mode, Rest (sent at stop). CCs go out on First Ch. |
+| LOCK | 4 lock values of the selected note (off or 0-127) / Lock CC 1-4 of the sequence, each with SEND / Note < > / Sequence. A lock is sent just before its note, on First Ch. |
+| RATE | Rate, Mode (Musical / Ratio), Ratio, Fine (Ratio mode: the step is Rate divided by Ratio + Fine) / Steps, Range Start, Range End, Direction / Swing. Mode, Ratio and Fine are per sequence. |
+| SETUP | Sequence (1-32), COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all scalaSeq instances) / Steps/Page, Group / PTN Count, Velocity / Pad 1 Note (0-44 or 92-127; LAST PAD under it), Clear Ops (the chance lanes of the selected note), Clear All Ops (of all notes; touch twice within 3 s). |
+| OUTPUT | Scale, Root, Root Tune / Out Ch, Voices / Bend Up, Bend Down, Curve. |
+| MASK (MASK 2) | Pads laid out like the MPC pads, one for each scale degree: MASK has degrees 0-15 (degree 0 at the bottom left); push the MASK button again for MASK 2 (degrees 16-30). A lit pad (amber frame) is in the scale mask. Touch a pad to put it in or out. Q-Link n is the pad at the same place. |
+
+The page order is SEQ, NOTE, CHANCE, LANE, LOCK, RATE, SETUP, OUTPUT, MASK. On each page a Q-Link column holds one set of controls ("/" separates the columns above). The orange Q-Link frame starts above the top control, so that the MPC's Q badge does not cover its name (not yet seen on the MPC).
 
 ### Lanes
 
@@ -177,7 +181,9 @@ scalaSeq reads `.scl` files from `Content/Scales/` in the plugin folder: 12-edo 
 
 - The engine runs for each audio sample with comparisons and a few multiplications. Chance rolls and pitch tables are calculated one time for each note or edit.
 - A worker thread sends the MIDI messages and writes the display parameters. No system calls occur on the audio thread.
-- Host simulator: about 0.01 % CPU for each block (desktop).
+- Host simulator: about 0.01 % CPU for each block (desktop, transport stopped).
+- Measured 2026-11-25 (desktop, 128-frame blocks, 16 notes, playing): process() median 1.9 us (0.06 % of a block), p99 about 5 us; a block with an edit or a view change about 4-8 us (p99 about 20 us). Not measured on the MPC One G2 (aarch64, Cortex-A55); the SDK gives no factor for this CPU.
+- After a project load the copy for project saving is made on the UI thread (2026-11-25). The audio thread copies the loaded model into place once (reset()), and after an edit only the edited sequence (15.5 KB).
 
 ## Build and test
 
