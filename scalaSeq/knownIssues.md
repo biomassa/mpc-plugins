@@ -161,4 +161,5 @@
 - Host simulator with --playing, seed 1234: the state round trip reports Play X (the playhead marker): the plugin writes it every block while playing. The same before the 2026-11-25 changes (checked with that build). By design.
 - CPU on the MPC is not measured. The numbers in the README are from the desktop.
 - Seen on the MPC One G2 (2026-11-25): the MPC cuts a control at the edge of its container (the tall Snap pads ran 19 px below their slot-sized container and were cut in half). Fixed by a taller container. Not known: whether the page itself shows all 628 px; the CHANCE page's bottom faders (moved 17 px down) end at about y 621: not yet seen on the MPC.
-
+- Not yet seen on the MPC (2026-11-26): the note COPY and PASTE buttons of the SEQ header.
+- Not yet seen on the MPC (2026-11-26): the SEQ header buttons as the top layer (fix for buttons that could not be pressed).

@@ -39076,6 +39076,64 @@
                         "boundsType": "Absolute",
                         "bounds": "1202 406 68 76"
                     }
+                },
+                {
+                    "version": 2,
+                    "componentData": {
+                        "version": 1,
+                        "name": "notecopy",
+                        "type": "Button",
+                        "data": {
+                            "version": 2,
+                            "onImage": "ssq_ncopyon.png",
+                            "offImage": "ssq_ncopyoff.png",
+                            "buttonId": 1,
+                            "numButtonsInGroup": 1,
+                            "handleName": "Parameter 1760",
+                            "gestureBehaviour": "Instant"
+                        }
+                    },
+                    "handle remapping": {
+                        "version": 1,
+                        "map": []
+                    },
+                    "bounds": {
+                        "version": 1,
+                        "acceptsHWFocus": "No",
+                        "showWhenDataModelInvalid": "Show",
+                        "whenVisible": "Always",
+                        "boundsType": "Absolute",
+                        "bounds": "688 2 100 40"
+                    }
+                },
+                {
+                    "version": 2,
+                    "componentData": {
+                        "version": 1,
+                        "name": "notepaste",
+                        "type": "Button",
+                        "data": {
+                            "version": 2,
+                            "onImage": "ssq_npasteon.png",
+                            "offImage": "ssq_npasteoff.png",
+                            "buttonId": 1,
+                            "numButtonsInGroup": 1,
+                            "handleName": "Parameter 1761",
+                            "gestureBehaviour": "Instant"
+                        }
+                    },
+                    "handle remapping": {
+                        "version": 1,
+                        "map": []
+                    },
+                    "bounds": {
+                        "version": 1,
+                        "acceptsHWFocus": "No",
+                        "showWhenDataModelInvalid": "Show",
+                        "whenVisible": "Always",
+                        "boundsType": "Absolute",
+                        "bounds": "794 2 100 40"
+                    }
                 }
             ]
         },

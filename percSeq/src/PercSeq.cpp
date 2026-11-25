@@ -55,7 +55,8 @@ constexpr int hitPieces(int k) { return k == 0 ? 10 : 9; }
 constexpr int hitOffset(int k) { return k == 0 ? 0 : 10 + (k - 1) * 9; }
 const float kHitOpacity[kHitLevels] = {0.30f, 0.55f, 0.80f, 1.0f};
 constexpr int kZoomN = 4;
-constexpr int kNumLists = 13;        // 1.3: + Ratio, Lane Rate, Lane Ratio       // 1.1: drawn pop-up lists: Entry Len, Op 1-4, PTN 1-4, Rate           // 1.1: Steps/Page 8, 16, 32, 64
+constexpr int kNumLists = 14;        // 2026-11-25: + Restart Rate
+//        // 1.3: + Ratio, Lane Rate, Lane Ratio       // 1.1: drawn pop-up lists: Entry Len, Op 1-4, PTN 1-4, Rate           // 1.1: Steps/Page 8, 16, 32, 64
 constexpr int kStepLines = 65, kSnapLines = 89, kGrpLines = 65, kNums = 64;
 
 enum ParamIndex
@@ -115,7 +116,13 @@ enum ParamIndex
     // 2026-11-25 (user): the selected hit's ratchet hits on the roll, as in the Max roll: one marker set per
     // brightness step (kHitLevels) and ratchet hit (8); hit 1 has 10 pieces (up to 1023 px), hits 2-8 have 9
     kRHitX0,
-    kNumParams = kRHitX0 + 4 * 73
+    // 2026-11-25 (user): SETUP: Max Steps, Restart, Restart Rate of the edited sequence
+    kMaxSt = kRHitX0 + 4 * 73, kRestart, kRestartRate,
+    // 2026-11-25 (user): a see-through shade from each row's end to the right (SEQ) and from Max Steps (LANE)
+    kShadeX0, kLnShadeX = kShadeX0 + kRows,
+    // 2026-11-26 (user): SEQ header COPY (the selected hit) and PASTE (armed; the next roll touch places it)
+    kHitCopy, kHitPaste,
+    kNumParams
 };
 constexpr int kFirstEdit = kGroup, kLastEdit = kCCRest;
 // MIDI notes 60-91 on this track select sequences 1-32. The 16 pad rows (Pad 1 Note .. +15) must
@@ -175,6 +182,10 @@ std::atomic<int> g_instances{0};
 Sequence g_clip;
 bool g_clipHas = false;
 std::mutex g_clipMutex;
+// 2026-11-26 (user): the copied hit (SEQ header COPY), shared by all percSeq instances
+Hit g_hitClip;
+std::atomic<bool> g_hitClipHas{false};
+std::mutex g_hitClipMutex;
 
 } // namespace
 
@@ -340,6 +351,14 @@ public:
                     const std::string sfx = std::to_string(l + 1) + "." + std::to_string(k + 1) + "." + std::to_string(pc);
                     addParam(mpc::floatParam(("rhitx" + sfx).c_str(), ("RHit X " + sfx).c_str(), 0, 1, 0, "", 4));
                 }
+        // 2026-11-25 (user): the edited sequence's length cap and common restart
+        addParam(mpc::intParam   ("maxsteps",  "Max Steps",  1, kMaxSteps, 7));
+        addParam(mpc::boolParam  ("restart",   "Restart",    false));
+        addParam(mpc::choiceParam("restartrate", "Restart Rate", rates, kDefRate));
+        for (int r = 0; r < kRows; ++r) disp(num("shadex", r), num("Shade X ", r), 1);
+        disp("lnshadex", "Lane Shade X", 1);
+        addParam(mpc::boolParam  ("hitcopy",   "Copy Hit",   false));
+        addParam(mpc::boolParam  ("hitpaste",  "Paste Hit",  false));
 
         if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
         for (auto& f : notify_) f.store(false);
@@ -473,6 +492,7 @@ public:
         }
         const int resetBars = getInt(kReset);
         const double resetQ = resetBars > 0 ? resetBars * barQ_ : 0;
+        const double cycQ = cycleQ();   // 2026-11-25: Restart of the playing sequence (0 = off)
 
         if (playing)
         {
@@ -493,6 +513,7 @@ public:
             // per sample); far from a boundary they cannot be true.
             double barNext = (std::floor(prevP / barQ_) + 1) * barQ_;
             double resetNext = resetQ > 0 ? (std::floor(prevP / resetQ) + 1) * resetQ : 0;
+            double cycNext = cycQ > 0 ? (std::floor(prevP / cycQ) + 1) * cycQ : 0;
             // 2026-11-25 (performance): a row that stays idle the whole block (no hit sounds, waits or starts,
             // the step does not change) is ticked once, at the last sample, instead of at every sample: the
             // engine ends the same (Engine::idleTill). Not in a block with a sequence note, a jump, a pending
@@ -500,7 +521,7 @@ public:
             {
                 const double pEnd = base + (ctx.numFrames - 1) * qps;
                 bool blockOk = !jump && seqEvN_ == 0 && !pendSwitch_ && !anySndNext_ && ctx.numFrames > 0
-                               && !(resetQ > 0 && pEnd >= resetNext - 1e-6);
+                               && !(resetQ > 0 && pEnd >= resetNext - 1e-6) && !(cycQ > 0 && pEnd >= cycNext - 1e-6);
                 if (blockOk && pEnd >= barNext - 1e-6)
                     for (int r = 0; r < kRows; ++r) if (rowPend_[r]) blockOk = false;
 #ifdef PERCSEQ_TEST
@@ -521,6 +542,7 @@ public:
                 const double p = base + i * qps;
                 bool restarted = false;
                 const bool nearBar = p >= barNext - 1e-6, nearReset = resetQ > 0 && p >= resetNext - 1e-6;
+                const bool nearCyc = cycQ > 0 && p >= cycNext - 1e-6;
                 // sequence notes switch at their sample and start the sequence there
                 while (ev < seqEvN_ && seqEv_[ev].at <= i)
                 {
@@ -530,7 +552,7 @@ public:
                     restarted = true;
                     ++ev;
                 }
-                if (!restarted && !(jump && i == 0) && (nearBar || nearReset))
+                if (!restarted && !(jump && i == 0) && (nearBar || nearReset || nearCyc))
                 {
                     // the Sequence knob: the new sequence starts at the next bar line
                     if (pendSwitch_ && std::floor(p / barQ_) > std::floor(prevP / barQ_))
@@ -545,6 +567,12 @@ public:
                         restartAll(std::floor(p / resetQ) * resetQ, true);
                         restarted = true;
                     }
+                    // 2026-11-25 (user): Restart: every Max Steps x Restart Rate all rows start again at their Range Start
+                    else if (cycQ > 0 && std::floor(p / cycQ) > std::floor(prevP / cycQ))
+                    {
+                        restartAll(std::floor(p / cycQ) * cycQ, true);
+                        restarted = true;
+                    }
                     // rows switched on start at their Range Start at the next bar line
                     else if (std::floor(p / barQ_) > std::floor(prevP / barQ_))
                         for (int r = 0; r < kRows; ++r)
@@ -552,6 +580,7 @@ public:
                 }
                 if (nearBar) barNext = (std::floor(p / barQ_) + 1) * barQ_;
                 if (nearReset) resetNext = (std::floor(p / resetQ) + 1) * resetQ;
+                if (nearCyc) cycNext = (std::floor(p / cycQ) + 1) * cycQ;
                 if (!restarted)
                     for (int r = 0; r < kRows; ++r)
                     {
@@ -686,6 +715,10 @@ public:
                 else out = tMore_.load() ? "more" : "";
                 return true;
             case kNudge: std::snprintf(b, sizeof b, v == 0 ? "0" : "%+d", v); out = b; return true;
+            case kRSteps:   // 2026-11-25 (user): "16 (7)" while Max Steps caps the row
+                if (v > tCap_.load()) std::snprintf(b, sizeof b, "%d (%d)", v, tCap_.load()); else std::snprintf(b, sizeof b, "%d", v);
+                out = b;
+                return true;
             // 1.3
             case kLock0: case kLock0 + 1: case kLock0 + 2: case kLock0 + 3:
                 if (v < 0) out = "off"; else { std::snprintf(b, sizeof b, "%d", v); out = b; }
@@ -745,13 +778,13 @@ public:
         return false;
     }
 
-    // Project state (format PSQ3; 1.1 PSQ2: + row on/off; 1.3 PSQ3: + rate mode, lock CCs, CC lanes, hit locks;
-    // PSQ1 and PSQ2 still load): the 32 sequences (16 rows each) and the pool.
+    // Project state (format PSQ4; 1.1 PSQ2: + row on/off; 1.3 PSQ3: + rate mode, lock CCs, CC lanes, hit locks;
+    // 2026-11-25 PSQ4: + Max Steps, Restart, Restart Rate per sequence; PSQ1-PSQ3 still load): the 32 sequences (16 rows each) and the pool.
     void saveExtraState(std::vector<uint8_t>& out) override
     {
         auto put32 = [&](uint32_t x) { for (int i = 0; i < 4; ++i) out.push_back((uint8_t)(x >> (8 * i))); };
         auto putF = [&](float f) { uint32_t u; std::memcpy(&u, &f, 4); put32(u); };
-        out.insert(out.end(), {'P', 'S', 'Q', '3'});
+        out.insert(out.end(), {'P', 'S', 'Q', '4'});
         put32((uint32_t)edSeq_); put32((uint32_t)selRow_); put32((uint32_t)sel_); put32((uint32_t)viewStart_);
         std::lock_guard<std::mutex> l(savedMutex_);
         for (int r = 0; r < kRows; ++r) out.push_back(saved_->pool[r] ? 1 : 0);
@@ -776,6 +809,12 @@ public:
                 const uint8_t* p = reinterpret_cast<const uint8_t*>(saveList_);
                 out.insert(out.end(), p, p + sizeof(Hit) * (size_t)n);
             }
+        // 2026-11-25 PSQ4: per sequence Max Steps, Restart, Restart Rate
+        for (int s = 0; s < kSeqs; ++s)
+        {
+            const Sequence& q = saved_->seqs[s];
+            out.insert(out.end(), {(uint8_t)q.maxSteps, (uint8_t)(q.restart ? 1 : 0), (uint8_t)q.restartRate});
+        }
     }
 
     void loadExtraState(const uint8_t* data, size_t size) override
@@ -783,7 +822,7 @@ public:
         size_t pos = 0;
         auto get32 = [&](uint32_t& x) { if (pos + 4 > size) return false; x = 0; for (int i = 0; i < 4; ++i) x |= (uint32_t)data[pos + i] << (8 * i); pos += 4; return true; };
         auto getF = [&](float& f) { uint32_t u; if (!get32(u)) return false; std::memcpy(&f, &u, 4); return true; };
-        if (size < 4 || std::memcmp(data, "PSQ", 3) != 0 || data[3] < '1' || data[3] > '3') return;
+        if (size < 4 || std::memcmp(data, "PSQ", 3) != 0 || data[3] < '1' || data[3] > '4') return;
         const int fmt = data[3] - '0';
         const bool v2 = fmt >= 2, v3 = fmt >= 3;
         pos = 4;
@@ -854,6 +893,19 @@ public:
                 std::memcpy(loadList_, q.hits, sizeof(Hit) * cnt);
                 q.fromList(loadList_, (int)cnt);
             }
+        // 2026-11-25 (user): projects saved before Max Steps play as before (64, Restart off)
+        for (int s = 0; s < kSeqs; ++s)
+        {
+            Sequence& q = m.seqs[s];
+            q.maxSteps = kMaxSteps; q.restart = false; q.restartRate = kDefRate;
+            if (fmt >= 4 && pos + 3 <= size)
+            {
+                q.maxSteps = std::max(1, std::min(kMaxSteps, (int)data[pos]));
+                q.restart = data[pos + 1] != 0;
+                q.restartRate = std::min(kNumRates - 1, (int)data[pos + 2]);
+                pos += 3;
+            }
+        }
         for (int k = 0; k < 4; ++k) stagingView_[k] = view[k];
         // 2026-11-25 (performance): the copy for project saving is made here (UI thread), not by a full-model
         // copy on the audio thread after the load
@@ -869,7 +921,7 @@ private:
         info.name = "percSeq";
         info.vendor = "blackdingus";
         info.uniqueId = MPC_FOURCC('B', 'x', 'P', 'q');
-        info.version = 1300;
+        info.version = 1400;
         info.isInstrument = true;
         info.numInputs = 0;
         info.numOutputs = 2;
@@ -918,8 +970,8 @@ private:
     {
         for (int r = 0; r < kRows; ++r)
         {
-            buildTables(model_->seqs[engSeq_].rows[r], tab(tIdx_, r));
-            if (pendSwitch_) buildTables(model_->seqs[edSeq_].rows[r], tab(1 - tIdx_, r));
+            buildTables(model_->seqs[engSeq_].rows[r], tab(tIdx_, r), model_->seqs[engSeq_].maxSteps);
+            if (pendSwitch_) buildTables(model_->seqs[edSeq_].rows[r], tab(1 - tIdx_, r), model_->seqs[edSeq_].maxSteps);
         }
         dirtyRows_ = 0;
     }
@@ -927,7 +979,7 @@ private:
     {
         for (int r = 0; r < kRows; ++r)
             if (dirtyRows_ & (1u << r))
-                buildTables(ed().rows[r], tab(edSeq_ == engSeq_ ? tIdx_ : 1 - tIdx_, r));
+                buildTables(ed().rows[r], tab(edSeq_ == engSeq_ ? tIdx_ : 1 - tIdx_, r), ed().maxSteps);
         dirtyRows_ = 0;
     }
     void markRow(int r) { dirtyRows_ |= 1u << r; }
@@ -941,7 +993,7 @@ private:
         if (edSeq_ != engSeq_)
         {
             pendSwitch_ = true;
-            for (int r = 0; r < kRows; ++r) buildTables(ed().rows[r], tab(1 - tIdx_, r));
+            for (int r = 0; r < kRows; ++r) buildTables(ed().rows[r], tab(1 - tIdx_, r), ed().maxSteps);
         }
         else pendSwitch_ = false;
         echoRow();
@@ -994,6 +1046,12 @@ private:
         }
         anySndNext_ = sndNext;   // 2026-11-25: SND NEXT reads every row's position (no idle skip)
     }
+    // 2026-11-25 (user): the Restart cycle of the playing sequence in quarter notes (0 = Restart off)
+    double cycleQ() const
+    {
+        const Sequence& q = model_->seqs[engSeq_];
+        return q.restart ? std::max(1, q.maxSteps) * rateQ(q.restartRate) : 0.0;
+    }
     double phaseOf(int r, double e) const
     {
         double ph = (e - anchor_[r]) * invLoop_[r];
@@ -1011,13 +1069,17 @@ private:
         nowP_ = p;
         cacheRows();
         const int resetBars = getInt(kReset);
-        const double resetQ = resetBars > 0 ? resetBars * barQ_ : 0;
+        const double resetQ = resetBars > 0 ? resetBars * barQ_ : 0, cycQ = cycleQ();
+        // after a jump: the last Reset or Restart boundary before p (-1: none, the rows follow the song grid)
+        double grid = -1;
+        if (resetQ > 0) grid = std::floor(p / resetQ + 1e-9) * resetQ;
+        if (cycQ > 0) grid = std::max(grid, std::floor(p / cycQ + 1e-9) * cycQ);
         for (int r = 0; r < kRows; ++r)
         {
             const Tables& T = tab(tIdx_, r);
             const double sq = stepQ(r);
             if (atStart) anchor_[r] = p - (startPos(T) + 1e-6) * sq;
-            else if (resetQ > 0) anchor_[r] = std::floor(p / resetQ + 1e-9) * resetQ - (startPos(T) + 1e-6) * sq;
+            else if (grid >= 0) anchor_[r] = grid - (startPos(T) + 1e-6) * sq;
             else anchor_[r] = 0;
             engines_[r].restart();
             stepFifo_[r] = StepFifo();
@@ -1025,7 +1087,7 @@ private:
             dispStep_[r] = -1;
             rowPend_[r] = false;
             // 1.3: CC lanes start at their step 1 at p (or follow the song / Reset grid after a jump)
-            lnAnchor_[r] = atStart ? p : (resetQ > 0 ? std::floor(p / resetQ + 1e-9) * resetQ : 0.0);
+            lnAnchor_[r] = atStart ? p : (grid >= 0 ? grid : 0.0);
             for (int l = 0; l < kCcLanes; ++l) { lnN_[r][l] = kNoStep; lnIdx_[r][l] = -1; }
             rowLive_[r] = playRow(r).on;
             if (!rowLive_[r]) continue;
@@ -1078,7 +1140,7 @@ private:
             const long n = (long)std::floor((p - lnAnchor_[r]) / sq + 1e-9);
             if (n == lnN_[r][l]) continue;
             lnN_[r][l] = n;
-            const int steps = std::max(1, (int)L.steps);
+            const int steps = std::max(1, std::min((int)L.steps, model_->seqs[engSeq_].maxSteps));   // 2026-11-25: Max Steps
             const int m = (int)(((n % steps) + steps) % steps);
             int idx = m;
             if (L.dir == 1) idx = steps - 1 - m;
@@ -1297,6 +1359,15 @@ private:
             snapChoice(i, v);
             closeList(i);
         }
+        for (int i = kMaxSt; i <= kRestartRate; ++i)   // 2026-11-25: Max Steps, Restart, Restart Rate
+        {
+            const float v = getNormalised(i);
+            if (v == lastSeen_[i]) continue;
+            lastSeen_[i] = v;
+            onEdit(i, plainOf(i, v));
+            snapChoice(i, v);
+            closeList(i);
+        }
         for (int i = kLnStep; i <= kLnValue; ++i)   // 2026-11-24: LANE drawing knobs
         {
             const float v = getNormalised(i);
@@ -1345,6 +1416,28 @@ private:
             else if (burstSend_ == i - kSend0) stopBurst(false);         // tap again: stop
         }
         tickBurst();
+        // 2026-11-26 (user): COPY takes the selected hit (lit for 150 ms); PASTE arms (stays lit) when a hit
+        // was copied; a second press disarms it; the next roll touch pastes (onPress)
+        {
+            float v = getNormalised(kHitCopy);
+            if (v != lastSeen_[kHitCopy])
+            {
+                lastSeen_[kHitCopy] = v;
+                if (v >= 0.5f)
+                {
+                    Hit* h = selHit();
+                    if (h && g_hitClipMutex.try_lock()) { g_hitClip = *h; g_hitClipHas.store(true); g_hitClipMutex.unlock(); copyLitMs_ = msNow(); }
+                    else echo(kHitCopy, 0);
+                }
+            }
+            if (getNormalised(kHitCopy) >= 0.5f && msNow() - copyLitMs_ > 150) echo(kHitCopy, 0);
+            v = getNormalised(kHitPaste);
+            if (v != lastSeen_[kHitPaste])
+            {
+                lastSeen_[kHitPaste] = v;
+                if (v >= 0.5f && !g_hitClipHas.load()) echo(kHitPaste, 0);   // nothing copied yet: does nothing
+            }
+        }
         pollTouch(0, kRollTX); pollTouch(1, kRulTX); pollTouch(2, kLabTX); pollTouch(3, kVelTX); pollTouch(4, kFreeTX);
     }
 
@@ -1362,7 +1455,7 @@ private:
     // 1.1: a pick in a drawn list (or a Q-Link turn of its parameter) closes the open list
     static bool isListParam(int i)
     {
-        if (i == kEntryLen || i == kRRate || i == kRRatio || i == kLnRate || i == kLnRatio) return true;
+        if (i == kEntryLen || i == kRRate || i == kRRatio || i == kLnRate || i == kLnRatio || i == kRestartRate) return true;
         return i >= kLane0 && i < kPool0 && ((i - kLane0) % 4 == 0 || (i - kLane0) % 4 == 2);
     }
     void closeList(int i) { if (isListParam(i) && getInt(kListOpen) != 0) echo(kListOpen, 0); }
@@ -1386,7 +1479,7 @@ private:
                 const Cell& c = h->ch[l];
                 const Unit u = opInfo(c.op).unit;
                 if (u == U_GATE) eff = c.amt;
-                else if (u != U_NONE) eff = (int)std::lround(opValue(c, s));
+                else if (u != U_NONE) eff = (int)std::lround(opValueIn(c, playSteps(s, ed().maxSteps), playStart(s, ed().maxSteps), playEnd(s, ed().maxSteps)));   // 2026-11-25: as the engine (Max Steps)
             }
             const bool ch = put(tChOp_[l], h ? h->ch[l].op : 0) | put(tChProb_[l], h ? (int)std::lround(h->ch[l].prob * 100) : 0)
                           | put(tChAmt_[l], eff);
@@ -1496,6 +1589,9 @@ private:
         echoLaneKnobs();
         echo(kCursor, cursor_);
         for (int r = 0; r < kRows; ++r) echo(kOn0 + r, ed().rows[r].on ? 1.0f : 0.0f);   // 1.1: the edited sequence's rows
+        echo(kMaxSt, (float)ed().maxSteps); echo(kRestart, ed().restart ? 1.0f : 0.0f);   // 2026-11-25
+        if (tCap_.exchange(ed().maxSteps) != ed().maxSteps) textNotify(kRSteps);
+        echo(kRestartRate, (float)ed().restartRate);
         viewDirty_ = true;
     }
     // 1.3: the LANE settings show the shown CC lane of the selected row
@@ -1776,6 +1872,15 @@ private:
                 if (v >= 0.5f) { setPage(page() + (i == kPageNext ? 1 : -1)); echo(i, 0); }
                 break;
             case kFollow: case kListOpen: break;
+            // 2026-11-25 (user): the edited sequence's Max Steps (every row plays again from new tables), Restart
+            case kMaxSt:
+                ed().maxSteps = std::max(1, std::min(kMaxSteps, iv));
+                if (tCap_.exchange(ed().maxSteps) != ed().maxSteps) textNotify(kRSteps);
+                for (int r = 0; r < kRows; ++r) markRow(r);
+                savedDirty_ = true; viewDirty_ = true;
+                break;
+            case kRestart: ed().restart = v >= 0.5f; savedDirty_ = true; break;
+            case kRestartRate: ed().restartRate = std::max(0, std::min(kNumRates - 1, iv)); echo(kRestartRate, (float)ed().restartRate); savedDirty_ = true; break;
             // 1.3: rate mode of the selected row
             case kRMode: s.mode = std::max(0, std::min(1, iv)); echo(kRMode, (float)s.mode); savedDirty_ = true; break;
             case kRRatio: s.ratio = std::max(0, std::min(kNumRatios - 1, iv)); echo(kRRatio, (float)s.ratio); savedDirty_ = true; textNotify(kRFine); break;
@@ -1993,6 +2098,7 @@ private:
         const float fx = rollX(tc), pos = posOfPx(fx);
         const int r = rowAtY(rollYUp(tc));
         Row& s = rowOf(r);
+        if (getNormalised(kHitPaste) >= 0.5f) { gMode_ = 0; pasteHitAt(r, pos); return; }   // 2026-11-26
         int hit = -1;
         for (int i = s.count - 1; i >= 0; --i)
         {
@@ -2036,6 +2142,34 @@ private:
         markRow(r);
         echoHit();
         preview();
+    }
+
+    // 2026-11-26 (user): PASTE: the copied hit in row r, starting on the Snap line under the finger (exact
+    // while FREE is held) plus its Nudge; shortened to the room; on a hit or without room nothing happens
+    // (PASTE stays armed). The new hit is selected; PASTE goes off.
+    void pasteHitAt(int r, float pos)
+    {
+        Hit c;
+        if (!g_hitClipMutex.try_lock()) return;
+        c = g_hitClip;
+        g_hitClipMutex.unlock();
+        Row& s = rowOf(r);
+        const float st = std::max(0.0f, snapOrFree(pos) + c.nd / 96.0f);
+        if (st >= s.steps - kEps || s.hitAt(st) >= 0) return;
+        const float room = s.maxLen(st, -1);
+        if (room < kMinLen) return;
+        c.st = st;
+        c.len = std::min(c.len, room);
+        const int idx = s.insert(c);
+        if (idx < 0) return;
+        if (r != selRow_) { selRow_ = r; echoRow(); }
+        sel_ = idx;
+        lastTapHit_ = -1;
+        markRow(r);
+        echoHit();
+        preview();
+        echo(kHitPaste, 0);
+        lastSeen_[kHitPaste] = getNormalised(kHitPaste);
     }
 
     void onDrag(int t, Touch& tc)
@@ -2303,8 +2437,11 @@ private:
         }
         for (int r = 0; r < kRows; ++r)
         {
-            const int st = sq.rows[r].steps;
+            const int st = playSteps(sq.rows[r], sq.maxSteps);   // 2026-11-25: where the row ends under Max Steps
             setDisp(kEndX0 + r, st < v0 + z - kEps && st >= v0 - kEps ? lineX((float)st, 3) : 1.0f);
+            // 2026-11-25 (user): the shade from the row's end to the right edge (value = left edge / roll width;
+            // 1 = after the roll, clipped by its container)
+            setDisp(kShadeX0 + r, std::max(0.0f, std::min(1.0f, pxOfPos((float)st) / kGW)));
         }
         setDisp(kCursorX, getBool(kStepEntry) && cursor_ >= v0 - kEps && cursor_ < v0 + z - kEps
                               ? padPos(pxOfPos(cursor_) + 6.5f, 13, wide) : 1.0f);
@@ -2465,6 +2602,9 @@ private:
             const bool cshow = L && cs >= viewStart_ && cs < viewStart_ + zoom() - kEps && cs < L->steps;
             for (int k = 0; k < kZoomN; ++k)
                 setDisp(kLnCurX0 + k, xParkLane(pxOfPos((float)cs) * kLK, cshow && k == zoomClass()));
+            // 2026-11-25 (user): the shade after Max Steps (CC lane: its played length; VEL: the row's)
+            const int lend = L ? std::min((int)L->steps, std::max(1, sq.maxSteps)) : playSteps(row(), sq.maxSteps);
+            setDisp(kLnShadeX, std::max(0.0f, std::min(1.0f, pxOfPos((float)lend) / kGW)));
         }
         setDisp(kLineY, 0.5f);
         updateTexts();
@@ -2579,6 +2719,7 @@ private:
     bool rowLive_[kRows] = {}, rowPend_[kRows] = {}, rowStarted_[kRows] = {};   // 1.1: row on/off while playing
     int tIdx_ = 0, edSeq_ = 0, engSeq_ = 0, selRow_ = 0, sel_ = -1, viewStart_ = 0;
     // 2026-11-25: the drawing slots of the shown hits (refreshView): in use, row, start
+    std::atomic<int> tCap_{7};   // 2026-11-25: Max Steps of the edited sequence, for the Steps text (UI thread)
     bool slotUsed_[kShown] = {};
     int slotRow_[kShown] = {};
     float slotSt_[kShown] = {};
@@ -2654,6 +2795,7 @@ private:
     bool gDelete_ = false;
     int lastTapHit_ = -1, lastTapRow_ = -1;
     double lastTapMs_ = -1e9;
+    double copyLitMs_ = -1e9;   // 2026-11-26: COPY lit since
     int gView0_ = 0, gZoom0_ = 16, gAxis_ = 0, gVelHit_ = -1;
     bool gFlipped_ = false;
 

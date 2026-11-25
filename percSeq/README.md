@@ -62,7 +62,7 @@ Touch on the roll (as scalaSeq):
 Other touch areas:
 
 - Ruler: swipe sideways (60 px) to flip one page (finger to the left = the next page); drag up or down to zoom. Steps/Page is 8 (default), 16, 32 or 64 steps; 24 px of drag changes it by one size.
-- Header: < and > flip one page; the page number is between them ("2/4"). The last page holds the end of the longest row. FOLLOW (lit amber when on): while the MPC plays, the page follows the selected row's playhead.
+- Header: < and > flip one page; the page number is between them ("2/4"). The last page holds the end of the longest row. FOLLOW (lit amber when on): while the MPC plays, the page follows the selected row's playhead. COPY takes the selected hit with all its settings; PASTE (lit while it waits) puts the copy where you touch the roll next: that row, the Snap line under the finger plus the copied Nudge, shortened if there is no room. Push PASTE again to stop waiting. The copy is shared by all percSeq instances.
 - Velocity lane: it shows the hits of the selected row. Drag a bar up or down to set the VEL of the hit.
 
 The SEQ page draws up to 32 hits. If more hits are in view, "more" shows at the right end of the ruler; zoom in or flip the page to see them.
@@ -98,6 +98,14 @@ MIDI notes 60-91 on the percSeq track select the sequences: note 60 is sequence 
 ## Reset
 
 Reset (SETUP page, off or 1-64 bars): every N bars of the song, all rows start again at their Range Start. With Reset off, the rows line up only at the song start and at MPC jumps.
+
+## Max Steps and Restart
+
+Max Steps (SETUP page, 1-64, per sequence; a new sequence has 7): no row plays more than Max Steps of its own steps, and no CC lane more than Max Steps of its lane steps. Each row keeps its own Steps, Range, Rate and Ratio. With Max Steps 7, a row with Steps 16 plays steps 1-7; set Max Steps to 16 or more and it plays 16 again. A hit that crosses the end plays cut at the end; a hit after the end does not play. The end bar of the row on the SEQ page shows where it ends; a see-through dark shade covers the row from its end to the right edge (after Steps, or after Max Steps when that is smaller). The LANE page shades the lane after the steps that play. On the RATE page, Steps shows "16 (7)" while Max Steps (7) caps a row with Steps 16.
+
+Restart (On/Off) and Restart Rate (1/64 ... 1 bar, default 1/16): with Restart on, all rows and CC lanes start again at their Range Start every Max Steps x Restart Rate (7 x 1/16 = 7 sixteenths), counted from the song start. Between two restarts each row plays at its own rate, also with Ratio. A row whose loop is longer than the cycle is cut at each restart. Reset and Restart can be on together.
+
+Projects saved before Max Steps load with Max Steps 64 and Restart off: they play as before.
 
 ## Controls on the pages
 
@@ -141,7 +149,7 @@ MIDI Learn turns off when you leave its page, and it ignores a single CC message
 | ROW | The selected row: Row, MIDI Note, Velocity / CHANCE OP CCs: REV CC (Rev CC), OP CC (CC Num), OP REST (CC Rest), each CC with SEND. These are the CCs of the SMP REV and CC chance operations (see Sound operations). At the right, 16 row pads (laid out like the MPC pads, row 1 at the bottom left): the lit pad is the selected row; touch a pad to select a row. Push the ROW button again for RATE. |
 | RATE | The timing of the selected row: Rate, Mode (Musical / Ratio), Ratio, Fine (Ratio mode: the step is Rate divided by Ratio + Fine) / Steps, Range Start, Range End, Direction / Swing / Row < >. |
 | POOL | Header: ROWS THAT SND+ / SND- / SND? CAN PICK. 16 pads laid out like the MPC pads (row 1 at the bottom left). Each pad shows its row and note. A lit pad is in the pool: the sound operations can pick it. Touch a pad to put it in or out. Q-Link 1-16 = row 1-16. |
-| SETUP | Sequence, COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all percSeq instances) / Steps/Page, Group / PTN Count, Reset / Pad 1 Note (LAST PAD under it), Out Ch, Clear Ops (the chance lanes of the selected hit), Clear All Ops (of all hits; touch twice within 3 s). |
+| SETUP | Sequence, COPY, PASTE, CLEAR (PASTE and CLEAR: touch twice within 3 s; the copy is shared by all percSeq instances) / Steps/Page, Group, Restart Rate (under Group) / PTN Count, Reset, Max Steps, Restart / Pad 1 Note (LAST PAD under it), Out Ch, Clear Ops (the chance lanes of the selected hit), Clear All Ops (of all hits; touch twice within 3 s). |
 
 The page order is SEQ, HIT, CHANCE, LANE, LOCK, ROW (RATE), POOL, SETUP. On each page a Q-Link column holds one set of controls ("/" separates the columns above). The orange Q-Link frame starts above the top control, so that the MPC's Q badge does not cover its name (not yet seen on the MPC).
 
@@ -152,7 +160,9 @@ The page order is SEQ, HIT, CHANCE, LANE, LOCK, ROW (RATE), POOL, SETUP. On each
 | MIDI Note | 0-127 (default 36-51) | The MIDI note of the row. |
 | Velocity | 0-100 % (default 100) | Scales the velocity of all hits of the row. At 0 % the row sends nothing. |
 | Rate | 1/64, 1/32T, 1/32, 1/16T, 1/16Q, 1/16, 1/8T, 1/8Q, 1/8D, 1/8, 1/4T, 1/4, 1/4D, 1/2, 1 bar (default 1/16) | The note value of one step. Q = quintuplet, D = dotted. |
-| Steps | 1-64 | The length of the row's loop. |
+| Steps | 1-64 | The length of the row's loop (at most Max Steps of its sequence play). |
+| Max Steps | 1-64 (default 7) | Per sequence: no row or CC lane plays more steps. |
+| Restart, Restart Rate | Off/On (default Off); 1/64 ... 1 bar (default 1/16) | Per sequence: all rows start again every Max Steps x Restart Rate. |
 | Range Start, Range End | 1-64 | The play range. |
 | Direction | Fwd, Rev, Rnd | |
 | Swing | 50-75 % | Swing of pairs of steps. |

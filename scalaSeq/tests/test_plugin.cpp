@@ -860,6 +860,49 @@ int main()
         CHECK(q.count == 15, "slots: the double tap deletes it: %d notes", q.count);
         CHECK(nNew <= 60 && nDel <= 60, "slots: few display reports: new note %d, delete %d", nNew, nDel);
     }
+    // ---- 2026-11-26 (user): SEQ header COPY / PASTE of a note
+    {
+        ScalaSeq c;
+        c.internalSetSampleRate(48000); c.internalSetBlockSize(64); c.internalResume();
+        waitWorker(); block(c, {});
+        auto press = [&](int i) { c.set(i, 1 - c.get(i)); block(c, {}); block(c, {}); };
+        press(kNotePaste);
+        CHECK(!c.getBool(kNotePaste), "PASTE with nothing copied does nothing");
+        Sequence& q = c.testModel().seqs[0];
+        const int vl = c.testViewLow();
+        Note n; n.st = 1 + 6 / 96.0f; n.len = 2; n.pitch = (int16_t)(kCenter + vl + 2); n.v = 0.4f; n.r = 3; n.fd = 10; n.d = 0.3f; n.gl = 0.5f;
+        n.ch[0].op = 1; n.ch[0].prob = 0.5f; n.lock[1] = 66;
+        q.insert(n);
+        c.internalResume(); block(c, {});
+        c.set(kNoteSel, 1); block(c, {});
+        CHECK(c.testSel() == 0, "the note is selected");
+        press(kNoteCopy);
+        CHECK(c.getBool(kNoteCopy), "COPY lights");
+        for (int i = 0; i < 160 * 48 / 64; ++i) block(c, {});
+        CHECK(!c.getBool(kNoteCopy), "COPY goes off after 150 ms");
+        press(kNotePaste); press(kNotePaste);
+        CHECK(!c.getBool(kNotePaste), "a second press disarms PASTE");
+        press(kNotePaste);
+        touchAt(c, kRollTX, rx(6.02f), ry(5)); lift(c, kRollTX); block(c, {});
+        int k = -1;
+        for (int i = 0; i < q.count; ++i) if (q.notes[i].pitch == kCenter + vl + 5) k = i;
+        CHECK(q.count == 2 && k >= 0, "PASTE: a note at row 5 (%d)", q.count);
+        if (k >= 0)
+        {
+            const Note& m = q.notes[k];
+            CHECK(std::fabs(m.st - (6 + 6 / 96.0f)) < 1e-4 && std::fabs(m.len - 2) < 1e-4, "PASTE: on the Snap line + Nudge, length 2: %f %f", m.st, m.len);
+            CHECK(std::fabs(m.v - 0.4f) < 1e-6 && m.r == 3 && m.fd == 10 && std::fabs(m.d - 0.3f) < 1e-6 && std::fabs(m.gl - 0.5f) < 1e-6
+                  && m.ch[0].op == 1 && m.lock[1] == 66, "PASTE: all attributes");
+            CHECK(c.testSel() == k && !c.getBool(kNotePaste), "PASTE: the new note selected, PASTE off");
+        }
+        press(kNotePaste);
+        touchAt(c, kRollTX, rx(7.0f), ry(5)); lift(c, kRollTX); block(c, {});
+        CHECK(q.count == 2 && c.getBool(kNotePaste), "PASTE on a note of that pitch: nothing, still armed");
+        touchAt(c, kRollTX, rx(5.02f), ry(5)); lift(c, kRollTX); block(c, {});
+        bool shortOne = false;
+        for (int i = 0; i < q.count; ++i) if (q.notes[i].pitch == kCenter + vl + 5 && std::fabs(q.notes[i].st - (5 + 6 / 96.0f)) < 1e-4 && std::fabs(q.notes[i].len - 1) < 1e-4) shortOne = true;
+        CHECK(q.count == 3 && shortOne, "PASTE: shortened to the room before the next note (%d)", q.count);
+    }
     std::printf(g_fail ? "%d FAILED\n" : "plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

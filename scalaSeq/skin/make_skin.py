@@ -163,6 +163,9 @@ BANKS = [("PITCH", ["Note", "Degree", "Period", "GLIDE"]),
 NO_DRAG = {"Note", "Move", "Length"}
 
 
+NCP_W = 100   # 2026-11-26 (user): the COPY and PASTE buttons of the header
+
+
 def seq_tab(lists):
     c = []
     ly = prm("Line Y")
@@ -174,6 +177,9 @@ def seq_tab(lists):
         c.append(name_label(f"h_{label}", named(label, pname), f"{x} 2 {nw} 40", 24, "ff8a8885"))
         c.append(value_label(f"v_{label}", prm(pname), f"{x + nw} 2 {vw} 40", 30))
         x += nw + vw + 10
+    # 2026-11-26 (user): COPY (the selected note) and PASTE (lit while armed; the next roll touch places the copy)
+    c.append(button("notecopy", prm("Copy Note"), "ssq_ncopyon.png", "ssq_ncopyoff.png", 1, 1, f"{x} 2 {NCP_W} 40"))
+    c.append(button("notepaste", prm("Paste Note"), "ssq_npasteon.png", "ssq_npasteoff.png", 1, 1, f"{x + NCP_W + 6} 2 {NCP_W} 40"))
     c.append(name_label("h_entry", named("STEP ENTRY", "Step Entry"), f"{PANELX} 2 170 40", 24, "ff8a8885"))
     c.append(value_label("v_entry", prm("Step Entry"), f"{PANELX + 170} 2 {1276 - PANELX - 170} 40", 30, "ff5dcaa5"))
     # Q-Link panel: the 4 banks as columns (the MPC frames the active bank). The names are labels here;
@@ -272,6 +278,11 @@ def seq_tab(lists):
         for k, nm in enumerate(names):
             c.append(lists.seq_cell(f"q{b}_{k}_v", P[nm], f"{PANELX + b * QCOLW} {RY + 32 + k * 110} {QCOLW} 76",
                                     drag=nm not in NO_DRAG))
+    # 2026-11-26 (user: the header buttons could not be pressed): the touch guard (whole page) and the ruler
+    # pad (it reaches above the ruler) lay over them. The header buttons go on top of everything, as the
+    # LANE header buttons do (those work on the MPC).
+    top = [e for e in c if e["componentData"]["name"] in ("notecopy", "notepaste")]
+    c = [e for e in c if e not in top] + top
     root = {"version": 2, "actions": [],
             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": BG, "image": ""},
                                "unfocussed": {"version": 1, "colour": BG, "image": ""}},
@@ -381,6 +392,9 @@ def pictures():
     for i, nm in enumerate(("VEL", "CC 1", "CC 2")):
         skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_on.png"), 100, HBH, nm, skin_ui.ON_C, skin_ui.DARK_C, 24)
         skin_ui.text_png(os.path.join(OUT, f"ssq_lane{i}_off.png"), 100, HBH, nm, skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
+    for nm, t in (("ncopy", "COPY"), ("npaste", "PASTE")):   # 2026-11-26
+        skin_ui.text_png(os.path.join(OUT, f"ssq_{nm}on.png"), NCP_W, 40, t, skin_ui.ON_C, skin_ui.DARK_C, 18)
+        skin_ui.text_png(os.path.join(OUT, f"ssq_{nm}off.png"), NCP_W, 40, t, skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 18)
     skin_ui.text_png(os.path.join(OUT, "ssq_lsend_on.png"), 90, HBH, "SEND", skin_ui.ON_C, skin_ui.DARK_C, 24)
     skin_ui.text_png(os.path.join(OUT, "ssq_lsend_off.png"), 90, HBH, "SEND", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 24)
     skin_ui.text_png(os.path.join(OUT, "ssq_send_on.png"), 90, 40, "SEND", skin_ui.ON_C, skin_ui.DARK_C, 24)

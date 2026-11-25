@@ -144,6 +144,7 @@ BANKS = [("HIT", ["Hit", "Row", "Move", "Length"]),
          ("SHAPE", ["VEL", "RATCH", "FADE", "DUTY"]),
          ("ENTRY", ["Nudge", "Entry Len", "Snap", "Page"]),
          ("ROW", ["Sel Row", "Rate", "Steps", "Sequence"])]
+HCP_W = 100     # 2026-11-26 (user): the COPY and PASTE buttons of the header
 FOLLOW_W = 74   # the FOLLOW button (its width before 2026-11-24, when it moved left)
 # panel cells without drag: values that percSeq limits (they have < > step controls on the other pages)
 NO_DRAG = {"Hit", "Row", "Move", "Length", "Sel Row"}
@@ -164,6 +165,10 @@ def seq_tab(lists):
     c.append(value_label("v_page", prm("View Text"), f"{x + 42} 2 62 40", 28, "ffffffff", "horizontallyCentred verticallyCentred"))
     c.append(button("pagenext", prm("Page Next"), "psq_next.png", "psq_next.png", 1, 1, f"{x + 106} 2 40 40"))
     c.append(button("follow", prm("Follow"), "psq_followon.png", "psq_followoff.png", 1, 1, f"{x + 152} 2 {FOLLOW_W} 40"))
+    # 2026-11-26 (user): COPY (the selected hit) and PASTE (lit while armed; the next roll touch places the copy)
+    cx = x + 152 + FOLLOW_W + 6
+    c.append(button("hitcopy", prm("Copy Hit"), "psq_hcopyon.png", "psq_hcopyoff.png", 1, 1, f"{cx} 2 {HCP_W} 40"))
+    c.append(button("hitpaste", prm("Paste Hit"), "psq_hpasteon.png", "psq_hpasteoff.png", 1, 1, f"{cx + HCP_W + 6} 2 {HCP_W} 40"))
     c.append(name_label("h_entry", named("STEP ENTRY", "Step Entry"), f"{PANELX} 2 170 40", 24, "ff8a8885"))
     c.append(value_label("v_entry", prm("Step Entry"), f"{PANELX + 170} 2 {1276 - PANELX - 170} 40", 30, "ff5dcaa5"))
     # Q-Link panel: the 4 banks as columns (the MPC frames the active bank). The names are labels here;
@@ -237,6 +242,13 @@ def seq_tab(lists):
     c.append(xypad("cursor", prm("Cursor X"), ly, "psq_cursor.png", vpad))
     for i in range(GRPLINES):
         c.append(xypad(f"grpline{i + 1}", prm(f"Grp Line {i + 1}"), ly, "psq_group.png", vpad))
+    # 2026-11-25 (user): a see-through shade from each row's end to the right edge of the roll (Max Steps):
+    # one picture as wide as the roll per row, its left edge at the end bar (Shade X = left / roll width);
+    # in a container of the roll's size, which clips it (the MPC clips children at their container edge)
+    shades = [xypad(f"shade{r + 1}", prm(f"Shade X {r + 1}"), ly, "psq_shade.png", f"{GX} {row_top(r):.2f} {2 * GW} {ROWH:.2f}")
+              for r in range(ROWS)]
+    c += lists._container("psq_shades", shades, f"{GX} {GY} {GW} {GH}")
+    lists.defs[-1][1]["ignoreMousePresses"] = True
     for r in range(ROWS):
         rpad = f"{GX} {row_top(r):.2f} {GW + PARK} {ROWH:.2f}"
         c.append(xypad(f"end{r + 1}", prm(f"End X {r + 1}"), ly, "psq_end.png", rpad))
@@ -282,6 +294,11 @@ def seq_tab(lists):
         for k, nm in enumerate(names):
             c.append(lists.seq_cell(f"q{b}_{k}_v", P[nm], f"{PANELX + b * QCOLW} {RY + 32 + k * 110} {QCOLW} 76",
                                     drag=nm not in NO_DRAG))
+    # 2026-11-26 (user: the header buttons could not be pressed): the touch guard (whole page) and the ruler
+    # pad (it reaches above the ruler) lay over them. The header buttons go on top of everything, as the
+    # LANE header buttons do (those work on the MPC).
+    top = [e for e in c if e["componentData"]["name"] in ("pageprev", "pagenext", "follow", "hitcopy", "hitpaste")]
+    c = [e for e in c if e not in top] + top
     root = {"version": 2, "actions": [],
             "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": BG, "image": ""},
                                "unfocussed": {"version": 1, "colour": BG, "image": ""}},
@@ -367,6 +384,9 @@ def number_png(path, n):
 
 def pictures():
     rh = int(ROWH)
+    shade = (0x1e, 0x1d, 0x1e, 0xa0)   # 2026-11-25: as SHADE_C (an off row)
+    png_pixels(os.path.join(OUT, "psq_shade.png"), GW, rh, lambda x, y: shade)
+    png_pixels(os.path.join(OUT, "psq_lnshade.png"), LW, VH, lambda x, y: shade)
     for k in range(PIECES):
         png_pixels(os.path.join(OUT, f"psq_p{k}.png"), (1 << k) + 1, NOTEH, lambda x, y: hexc(NOTE_C))
         body = mix(ROLL_BG, SEL_C, BODY_OPACITY)
@@ -420,6 +440,9 @@ def pictures():
     fw = FOLLOW_W
     skin_ui.text_png(os.path.join(OUT, "psq_followon.png"), fw, 40, "FOLLOW", skin_ui.ON_C, skin_ui.DARK_C, 18)
     skin_ui.text_png(os.path.join(OUT, "psq_followoff.png"), fw, 40, "FOLLOW", skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 18)
+    for nm, t in (("hcopy", "COPY"), ("hpaste", "PASTE")):   # 2026-11-26
+        skin_ui.text_png(os.path.join(OUT, f"psq_{nm}on.png"), HCP_W, 40, t, skin_ui.ON_C, skin_ui.DARK_C, 18)
+        skin_ui.text_png(os.path.join(OUT, f"psq_{nm}off.png"), HCP_W, 40, t, skin_ui.OFF_C, (0xe4, 0xe4, 0xe6), 18)
     png_pixels(os.path.join(OUT, "psq_togon.png"), TOGW, TOGW, lambda x, y: hexc(ON_C))
     png_pixels(os.path.join(OUT, "psq_togoff.png"), TOGW, TOGW, lambda x, y: hexc(OFF_C))
     png_pixels(os.path.join(OUT, "psq_cursor.png"), 13, GH, lambda x, y: (0x37, 0x8a, 0xdd, 0x60))
@@ -435,8 +458,8 @@ def pictures():
 
 # 1.1: the list controls (common/skin_ui.py) by tab: (slot, kind, parameter, list id or choices)
 LIST_IDS = {"Entry Len": 1, "Op 1": 2, "Op 2": 3, "Op 3": 4, "Op 4": 5, "PTN 1": 6, "PTN 2": 7, "PTN 3": 8, "PTN 4": 9, "Rate": 10,
-            "Ratio": 11, "Lane Rate": 12, "Lane Ratio": 13}
-N_LISTS = 14   # list ids 1-13 and 0 = none (the plugin's "List Open" range)
+            "Ratio": 11, "Lane Rate": 12, "Lane Ratio": 13, "Restart Rate": 14}
+N_LISTS = 15   # list ids 1-14 and 0 = none (the plugin's "List Open" range)
 TEAL = (0x5d, 0xca, 0xa5)
 RATIOS = ["0.25", "0.33", "0.5", "0.67", "0.75", "0.8", "1", "1.25", "1.33", "1.5", "1.67", "2", "2.5", "3", "4"]
 NOT_VEL = "RangedEnabling/1/2/3/{Lane}"            # LANE settings: hidden while VEL is shown
@@ -464,7 +487,7 @@ LISTS = {
                (8, "popup", "PTN 1"), (9, "popup", "PTN 2"), (10, "popup", "PTN 3"), (11, "popup", "PTN 4")],
     "RATE": [(0, "popup", "Rate"), (4, "pads", "Rate Mode"), (8, "popup", "Ratio"), (13, "pads", "Direction")],
     "LANE": [(10, "popup", "Lane Rate"), (11, "pads", "Lane Mode"), (12, "popup", "Lane Ratio"), (14, "pads", "Lane Dir")],
-    "SETUP": [(2, "pads", "PTN Count"), (1, "pads", "Steps/Page")],
+    "SETUP": [(2, "pads", "PTN Count"), (1, "pads", "Steps/Page"), (13, "popup", "Restart Rate")],   # 2026-11-25 (user): Restart Rate under Group
 }
 
 
@@ -535,6 +558,8 @@ def lane_parts():
     for j in range(SHOWN):
         c.append(vis(xypad(f"vel{j + 1}", prm(f"Vel X {j + 1}"), prm(f"Vel Y {j + 1}"), "psq_vel.png", xpark_lane(LX, VELW, VY, 2 * VH)), [vv]))
     c.append(vis(xypad("selvel", prm("Sel Vel X"), prm("Sel Vel Y"), "psq_svel.png", xpark_lane(LX, VELW, VY, 2 * VH)), [vv]))
+    # 2026-11-25 (user): the shade after Max Steps, over the bars (left edge = Lane Shade X x lane width)
+    c.append(xypad("lnshade", prm("Lane Shade X"), fixed0, "psq_lnshade.png", f"{LX} {VY} {2 * LW} {VH}"))
     # the bars reach below the lane: a mask over that part (the generated controls are drawn on top)
     c.append(image("lanemask", BG, f"0 {VY + VH} 1280 {VH + 4}"))
     c.append(image("lanemaskl", BG, f"0 {VY} {LX} {VH}"))

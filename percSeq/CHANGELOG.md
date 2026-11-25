@@ -7,9 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Fixed
+## [1.4.0] - 2026-11-26
 
-- SEQ page (2026-11-25, user: hits seen for a moment while setting, moving or deleting hits): each shown hit keeps its drawing slot. Before, the slots were filled in row order, so one new or deleted hit moved every later hit to another slot. That took up to about 200 display reports, which go out 30 per 50 ms pass, and the passes between showed bars in wrong places or missing. A new hit now takes 39 reports (2 passes), a delete 22, a drag 12-20 (desktop test, 31 hits shown). A new test runs the passes one by one, from every start position of the pass, and requires that no frame shows a bar that is in neither the old nor the new picture; it fails with the old code (201 reports, 17 wrong bars).
+### Added
+
+- SEQ header: COPY and PASTE of a hit (user, 2026-11-26), after FOLLOW. COPY takes the selected hit (length, VEL, RATCH, FADE, DUTY, Nudge, the chance operations, the locks); it lights for a moment. PASTE (when a hit was copied) lights and waits: the next touch on the roll places the copy in that row, on the Snap line under the finger (exact while FREE is held) plus its Nudge, and PASTE goes off. Without room for its length the copy is shortened to fit; on a hit, or without any room, nothing happens and PASTE stays lit. A second press of PASTE turns it off. The pasted hit is selected. The copy is shared by all percSeq instances (lost when the MPC app restarts). New parameters at the end: Copy Hit, Paste Hit.
+- Max Steps, Restart and Restart Rate (SETUP page, per sequence; user, 2026-11-25). Max Steps (1-64): no row plays more than this many of its own steps, and no CC lane more than this many of its lane steps. Each row keeps its Steps, Range, Rate and Ratio: with Max Steps 7, a row with Steps 16 plays steps 1-7, and plays 16 again when Max Steps goes up. A hit that crosses the end plays cut at the end; a hit after it does not play. The end bar on the SEQ page shows where the row ends, and a see-through dark shade covers each row from its end to the right edge (also after Steps when Max Steps does not cap the row). The LANE page shades the lane after the played length. RATE: Steps shows "16 (7)" while Max Steps caps it. Restart (On/Off) with Restart Rate (1/64 ... 1 bar): all rows and CC lanes start again at their Range Start every Max Steps x Restart Rate, counted from the song start (like Reset). Each row keeps its own rate between two restarts. After a jump the rows follow the last Reset or Restart point. A new sequence (and CLEAR) has Max Steps 7, Restart off, Restart Rate 1/16. Projects saved before load with Max Steps 64 and Restart off, so they play as before. COPY and PASTE take the settings along. SETUP: column 3 is PTN Count, Reset, Max Steps, Restart; Restart Rate is in column 2 under Group. Project format PSQ4 (PSQ1-PSQ3 still load). New parameters at the end: Max Steps, Restart, Restart Rate. **After this update, remove percSeq from its track and add it again**: the SETUP Q-Links changed. The differential idle-skip test now also runs with random Max Steps and Restart cycles (it fails when a Restart boundary is not kept out of the idle skip).
+
+- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column as wide as the step, behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. STEP and VALUE show right of SEND. With VEL shown, knob 1 selects the hit of the row and knob 2 sets its VEL (the text shows HIT and VEL). Each row has its own cursors (not saved). New parameters Lane Step, Lane Value and Lane Cur X 1-4 (added at the end).
+- CHANCE: a header strip at the top with Hit < >, Row < >, HIT and ROW. The controls moved 17 px down.
 
 ### Changed
 
@@ -51,12 +57,10 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - LANE page: the current step is a thin red line (4 px) under the bars, as wide as the step. Before, it was a white 25 % column behind the bars, which the bars hid. The VEL lane now shows it too (the selected row's current step); the CC lanes show their own step.
 - POOL pads and SEQ row labels: the row number is dim grey (8a8885) and the note is white, so the two numbers are different. They were one text in one colour. New display parameters Note Text 1-16 (added at the end; the parameter count is now 1,337).
 
-### Added
-
-- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column as wide as the step, behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. STEP and VALUE show right of SEND. With VEL shown, knob 1 selects the hit of the row and knob 2 sets its VEL (the text shows HIT and VEL). Each row has its own cursors (not saved). New parameters Lane Step, Lane Value and Lane Cur X 1-4 (added at the end).
-- CHANCE: a header strip at the top with Hit < >, Row < >, HIT and ROW. The controls moved 17 px down.
-
 ### Fixed
+
+- SEQ header buttons (< >, FOLLOW, COPY, PASTE) could not be pressed (user, 2026-11-26): the touch guard (an invisible pad over the whole page) and the ruler pad (it reaches above the ruler) were on top of them. The header buttons are now the top layer, as on the LANE page, whose header buttons work on the MPC.
+- SEQ page (2026-11-25, user: hits seen for a moment while setting, moving or deleting hits): each shown hit keeps its drawing slot. Before, the slots were filled in row order, so one new or deleted hit moved every later hit to another slot. That took up to about 200 display reports, which go out 30 per 50 ms pass, and the passes between showed bars in wrong places or missing. A new hit now takes 39 reports (2 passes), a delete 22, a drag 12-20 (desktop test, 31 hits shown). A new test runs the passes one by one, from every start position of the pass, and requires that no frame shows a bar that is in neither the old nor the new picture; it fails with the old code (201 reports, 17 wrong bars).
 
 - HIT page: the second row of the Snap pads was cut in half (seen on the MPC One G2, 2026-11-25). The pads' container was one slot tall (107 px) and the MPC cuts what is outside it; it is now as tall as the pads. (The first guess, the bottom of the screen, was wrong: the pads were cut in the upper slot too.)
 

@@ -7,10 +7,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-### Fixed
+## [2.9.0] - 2026-11-26
 
-- Degree (2026-11-25, user: Q-Links seemed stuck): the knob turns like a normal knob. A Q-Link write moves a parameter by 1-3 x 1/128 of its range (measured on the MPC), less than one degree band of the knob (64 / number of degrees), and scalaSeq wrote the knob back to the middle of the degree after each write, so a turn did not change the degree. Now the knob goes to the middle of the degree only when another note is selected, or when the knob points to a degree the note cannot take. New test: 16 writes of 1/128 change the degree (fails with the old code).
-- SEQ page (2026-11-25, as percSeq): each shown note keeps its drawing slot. Before, one new or deleted note moved every later note to another slot. With 15 notes on the screen, a new note now takes 38 display reports (was 128), a delete 35 (was 126). New test (fails with the old code).
+### Added
+
+- SEQ header: COPY and PASTE of a note (user, 2026-11-26), after VIEW, as in percSeq. COPY takes the selected note (length, VEL, RATCH, FADE, DUTY, GLIDE, Nudge = its distance from its Snap line, the chance operations, the locks). PASTE (when a note was copied) lights and waits: the next touch on the roll places the copy at the pitch under the finger, on the Snap line under it (exact while FREE is held) plus the Nudge, and PASTE goes off. Without room for its length (the next note of that pitch, or the end) the copy is shortened; on a note of that pitch, or without any room, nothing happens and PASTE stays lit. A second press turns PASTE off. The pasted note is selected. The copy is shared by all scalaSeq instances (lost when the MPC app restarts). New parameters at the end: Copy Note, Paste Note.
+
+- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. The header shows STEP and VALUE. With VEL shown, knob 1 selects the note and knob 2 sets its VEL (the header shows NOTE and VEL). New parameters Lane Step, Lane Value and Lane Cur X (added at the end).
+- CHANCE: a header strip at the top with < > (select the note), NOTE and DEG. The controls moved 17 px down.
+- A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
 
 ### Changed
 
@@ -46,17 +51,15 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Fixed
 
+- SEQ header buttons (COPY, PASTE) could not be pressed (seen in percSeq, user, 2026-11-26): the touch guard and the ruler pad were on top of them. They are now the top layer, as the LANE header buttons.
+- Degree (2026-11-25, user: Q-Links seemed stuck): the knob turns like a normal knob. A Q-Link write moves a parameter by 1-3 x 1/128 of its range (measured on the MPC), less than one degree band of the knob (64 / number of degrees), and scalaSeq wrote the knob back to the middle of the degree after each write, so a turn did not change the degree. Now the knob goes to the middle of the degree only when another note is selected, or when the knob points to a degree the note cannot take. New test: 16 writes of 1/128 change the degree (fails with the old code).
+- SEQ page (2026-11-25, as percSeq): each shown note keeps its drawing slot. Before, one new or deleted note moved every later note to another slot. With 15 notes on the screen, a new note now takes 38 display reports (was 128), a delete 35 (was 126). New test (fails with the old code).
+
 - NOTE page: the second row of the Snap pads was cut in half (seen on the MPC One G2, 2026-11-25). The pads' container was one slot tall (107 px) and the MPC cuts what is outside it; it is now as tall as the pads. (The first guess, the bottom of the screen, was wrong: the pads were cut in the upper slot too.)
 
 - Pop-up lists: the MPC's orange Q-Link frame was drawn over an open list. The list panels now ask the MPC to hide the frame while they are shown (hideQLinkBounds, component version 4). Seen working on the MPC One G2: the frame is hidden only while a list is open.
 - SEQ page, Q-Link panel: the values of the drag cells did not show on the MPC One G2 (the MPC's ValueSlider knob draws no text there). Each value is now a text label, with the drag knob on top of it.
 - Range End (RATE page): when Range End is at the last step, it now follows Steps. Before, Steps 16 -> 1 -> 16 left Range End at 1, and only 1 step played. A Range End inside the steps stays; it is clipped when Steps goes below it. When it is clipped to the last step, it follows Steps from then on.
-
-### Added
-
-- LANE: draw with the Q-Links. Q-Link column 1, knob 1 (Lane Step) moves a cursor (a see-through teal column behind the bars) and knob 2 (Lane Value) sets the value at the cursor (0-127). A touch on the lane also moves the cursor. The header shows STEP and VALUE. With VEL shown, knob 1 selects the note and knob 2 sets its VEL (the header shows NOTE and VEL). New parameters Lane Step, Lane Value and Lane Cur X (added at the end).
-- CHANCE: a header strip at the top with < > (select the note), NOTE and DEG. The controls moved 17 px down.
-- A trace build for diagnosis (`python tools/build.py plugins/scalaSeq --define SCALASEQ_TRACE=1`). It records every call between the MPC and scalaSeq to /tmp/ssq_trace.bin on the MPC. tests/trace_report.py makes a report for each second. The trace build can also move the rows by itself to test the display reports. Do not release it.
 
 ## [2.8.0] - 2026-11-22
 

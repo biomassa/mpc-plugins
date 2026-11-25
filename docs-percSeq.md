@@ -40,7 +40,7 @@ After an update of percSeq, remove it from the track and add it again.
 
 | Page | What it does |
 |---|---|
-| SEQ | The grid of 16 rows. Draw, move and delete hits. The Q-Link banks are at the right. |
+| SEQ | The grid of 16 rows. Draw, move and delete hits. COPY and PASTE (header): copy the selected hit, then push PASTE and touch where it goes. The Q-Link banks are at the right. |
 | HIT | All values of the selected hit, and step entry. |
 | CHANCE | The 4 chance lanes of the selected hit: Op, Prob, PTN, Amount. Hit < > and Row < > at the top select the hit. |
 | LANE | The velocity of the row's hits, and the 2 CC lanes of the row. Draw the lane values with a finger or with Q-Link column 1. |
@@ -48,7 +48,7 @@ After an update of percSeq, remove it from the track and add it again.
 | ROW | The selected row: MIDI Note, Velocity, and under CHANCE OP CCs the CCs of the SMP REV and CC chance operations: REV CC, OP CC, OP REST (each CC with SEND, for MIDI Learn). 16 pads select the row. Push the ROW button again for RATE. |
 | RATE | The timing of the selected row: Rate, Mode, Ratio, Fine, Steps, Range Start, Range End, Direction, Swing. |
 | POOL | 16 pads under the header ROWS THAT SND+ / SND- / SND? CAN PICK. A lit pad is in the pool of the sound operations. |
-| SETUP | Sequence, COPY, PASTE, CLEAR, Steps/Page, Group, PTN Count, Reset, Pad 1 Note (and LAST PAD), Out Ch, Clear Ops, Clear All Ops. |
+| SETUP | Sequence, COPY, PASTE, CLEAR, Steps/Page, Group, Restart Rate, PTN Count, Reset, Max Steps, Restart, Pad 1 Note (and LAST PAD), Out Ch, Clear Ops, Clear All Ops. |
 
 The MPC shows 5 page buttons at a time: touch > for the next pages. On every page, each Q-Link column holds one set of controls. The orange frame shows the column that the 4 Q-Links control.
 
@@ -112,6 +112,8 @@ To connect a CC to a pad parameter of the MPC, use MIDI Learn:
 - MIDI notes 60-91 on the percSeq track select sequences 1-32. Record these notes in the MPC sequence of the percSeq track to arrange a song.
 - While the MPC plays, a sequence note starts the new sequence at once. The Sequence knob starts it at the next bar line.
 - Reset (SETUP page) starts all rows again every N bars.
+- Max Steps (SETUP page, per sequence, default 7): no row plays more than this many of its own steps. The row keeps its Steps.
+- Restart (SETUP page) with Restart Rate: all rows start again every Max Steps x Restart Rate. Each row keeps its own rate.
 - COPY copies the sequence. PASTE (touch two times) puts it into the selected sequence. CLEAR (touch two times) empties the sequence.
 
 ## Steps and kept hits

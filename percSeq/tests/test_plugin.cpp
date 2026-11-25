@@ -59,6 +59,7 @@ static void clearSeq(PercSeq& p, int s = 0)
 {
     Sequence& q = p.testModel().seqs[s];
     for (int r = 0; r < kRows; ++r) { Row fresh; fresh.note = 36 + r; fresh.revCC = 102 + r; fresh.ccNum = 14 + r; q.rows[r] = fresh; }
+    q.maxSteps = kMaxSteps; q.restart = false;   // 2026-11-25: the tests before Max Steps assume no cap
 }
 static void addHit(PercSeq& p, int r, float st, float len = 0.5f, int s = 0)
 {
@@ -665,7 +666,7 @@ int main()
         u.testSaveAll(); block(u, {});
         std::vector<uint8_t> out;
         u.saveExtraState(out);
-        CHECK(out.size() > 4 && out[3] == '3', "state format PSQ3");
+        CHECK(out.size() > 4 && out[3] == '4', "state format PSQ4");
         PercSeq q3;
         q3.internalSetSampleRate(48000); q3.internalSetBlockSize(kFr); q3.internalResume();
         q3.loadExtraState(out.data(), out.size());
@@ -837,6 +838,14 @@ int main()
                     if (R.sndNext && r == 3 && w.count > 0) w.hits[0].ch[0].op = O_SNDNEXT;
                     a.testModel().seqs[s].rows[r] = w; b.testModel().seqs[s].rows[r] = w;
                 }
+            // 2026-11-25: Max Steps and the Restart cycle (a boundary inside a block must not let a row skip)
+            for (int s = 0; s < 2; ++s)
+            {
+                const int mx = 1 + rnd(16);                       // short cycles: many restarts in 40 s
+                const bool rst = rnd(4) != 0;
+                const int rr = rnd(10);                           // 1/64 ... 1/8
+                for (PercSeq* p : {&a, &b}) { Sequence& q = p->testModel().seqs[s]; q.maxSteps = mx; q.restart = rst; q.restartRate = rr; }
+            }
             for (PercSeq* p : {&a, &b}) { p->internalResume(); }
             const double qps = R.bpm / 60.0 / R.sr;
             double ppq = 0;
@@ -1066,6 +1075,207 @@ int main()
             if (g_fail != f0) { ++badStarts; if (badStarts > 3) break; }
         }
         CHECK(badStarts == 0 && sq.rows[12].count == 0, "frames: every pass start: %d bad, row 13 hits %d", badStarts, sq.rows[12].count);
+    }
+    // ---- 2026-11-25 (user): Max Steps (per sequence; rows keep their Steps and their own rates), Restart
+    {
+        PercSeq m;
+        m.internalSetSampleRate(48000); m.internalSetBlockSize(kFr); m.internalResume();
+        block(m, {});
+        Sequence& q = m.testModel().seqs[0];
+        // a parameter write that is seen as an edit even when the parameter already has the value
+        auto force = [&](int i, float v) { m.set(i, v == m.param(i).min ? m.param(i).max : m.param(i).min); block(m, {}); m.set(i, v); block(m, {}); };
+        CHECK(q.maxSteps == 7 && !q.restart && q.restartRate == kDefRate, "new sequence: Max Steps 7, Restart off, 1/16");
+        CHECK((int)m.get(kMaxSt) == 7 && !m.getBool(kRestart) && (int)m.get(kRestartRate) == kDefRate, "the SETUP parameters show it");
+        // tables: Steps 16, Max 7 -> 7 steps; a hit across step 7 is cut at 7; a hit after it is not in the table
+        {
+            Row w; w.steps = 16; w.rEnd = 15;
+            Hit a; a.st = 6; a.len = 3; w.insert(a);
+            Hit b; b.st = 9; b.len = 1; w.insert(b);
+            Tables T; buildTables(w, T, 7);
+            CHECK(T.steps == 7 && T.re == 6, "tables: 7 steps, range end 7: %d %d", T.steps, T.re);
+            CHECK(near(T.fwd[6][0].len, 1, 1e-6) && T.fwd[9][0].len == 0, "tables: the hit at 6 cut to 1 step, the hit at 9 not played");
+            Tables U; buildTables(w, U, 64);
+            CHECK(U.steps == 16 && near(U.fwd[6][0].len, 3, 1e-6) && U.fwd[9][0].len > 0, "tables: Max 64 plays the whole row");
+        }
+        // playback: Steps 16, hits at 2 and 10; Max 7 -> the hit at 2 every 7 sixteenths, the hit at 10 never
+        clearSeq(m);
+        Row& r0 = q.rows[0];
+        r0.steps = 16; r0.rEnd = 15;
+        addHit(m, 0, 2, 0.5f); addHit(m, 0, 10, 0.5f);
+        force(kMaxSt, 7); block(m, {});
+        CHECK(q.maxSteps == 7 && r0.steps == 16, "Max Steps 7 keeps the row's Steps 16");
+        rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 4.0); stop(m);
+        {
+            std::vector<double> t;
+            for (auto& e : ons(m)) if (e.a == 36) t.push_back(e.t);
+            // 0-4 q: the hit at 2 at 0.5 and 2.25 (7 x 1/16 = 1.75 q apart); the hit at 10 (2.5 without the cap) never
+            CHECK(t.size() == 2 && near(t[0], 0.5) && near(t[1], 2.25), "cap: only the hit at 2, at 0.5 and 2.25 (%zu notes)", t.size());
+        }
+        // Max 64 again: the row plays its 16 steps and the hit at 10 comes back
+        force(kMaxSt, 64); block(m, {}); rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 4.0); stop(m);
+        {
+            int n9 = 0;
+            for (auto& e : ons(m)) if (e.a == 36 && near(e.t, 2.5)) ++n9;
+            CHECK(n9 == 1, "Max 64: the hit at 10 plays again (Steps was kept): %d", n9);
+        }
+        // Restart: Max 7 x 1/16 = 1.75 q. Row 1 at 1/8 (own rate) with a hit on step 0: it plays at 0 and 1.0
+        // (its own loop of 7 x 1/8 = 3.5 q) and again at every restart 1.75, 3.5; between restarts its own steps
+        clearSeq(m);
+        Row& r1 = q.rows[1];
+        r1.rate = 9; r1.steps = 16; r1.rEnd = 15;   // 1/8
+        addHit(m, 1, 0, 0.5f); addHit(m, 1, 2, 0.5f);
+        force(kMaxSt, 7); force(kRestart, 1); force(kRestartRate, kDefRate); block(m, {});
+        rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 3.6); stop(m);
+        {
+            std::vector<double> t;
+            for (auto& e : ons(m)) if (e.a == 37) t.push_back(e.t);
+            // hit 0 at 0, 1.75, 3.5; hit at step 2 (1/8) = 1.0 after each start: 1.0, 2.75
+            const double want[] = {0, 1.0, 1.75, 2.75, 3.5};
+            bool ok = t.size() == 5;
+            for (size_t k = 0; ok && k < 5; ++k) ok = near(t[k], want[k]);
+            CHECK(ok, "Restart: row 1/8 restarts every 1.75 q (%zu notes)", t.size());
+        }
+        // a ratio row keeps its own (non-musical) step: Ratio mode, step = 1/16 / ratio; with Restart the
+        // step 0 hit comes again at every restart, its step 1 hit one own step later
+        clearSeq(m);
+        Row& r2 = q.rows[2];
+        r2.mode = 1; r2.ratio = 8; r2.fine = 3; r2.steps = 16; r2.rEnd = 15;
+        const double sq = stepQOf(r2.rate, r2.mode, r2.ratio, r2.fine);
+        addHit(m, 2, 0, 0.5f); addHit(m, 2, 1, 0.5f);
+        force(kMaxSt, 7); force(kRestart, 1); block(m, {}); rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 1.8); stop(m);
+        {
+            std::vector<double> t;
+            for (auto& e : ons(m)) if (e.a == 38) t.push_back(e.t);
+            bool ok = t.size() >= 3 && near(t[0], 0) && near(t[1], sq, 2e-4);
+            bool atCyc = false;
+            for (double x : t) if (near(x, 1.75)) atCyc = true;
+            CHECK(ok && atCyc, "Restart: a ratio row keeps its own step (%g q) and restarts at 1.75 (%zu notes)", sq, t.size());
+        }
+        // a jump into a cycle: the rows follow the last restart (1.75): row 1 hit at step 2 (1/8) = 2.75
+        clearSeq(m);
+        q.rows[1].rate = 9; q.rows[1].steps = 16; q.rows[1].rEnd = 15;
+        addHit(m, 1, 2, 0.5f);
+        force(kMaxSt, 7); force(kRestart, 1); block(m, {}); rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 0.2); play(m, 2.0, 3.0); stop(m);
+        {
+            int n = 0;
+            for (auto& e : ons(m)) if (e.a == 37 && near(e.t, 2.75)) ++n;
+            CHECK(n == 1, "Restart: after a jump the rows follow the last restart: %d", n);
+        }
+        // CC lane: Lane Steps 16, Max 7: values of steps 0-6 only
+        clearSeq(m);
+        CcLane& L = q.rows[3].lane[0];
+        L.cc = 40; L.steps = 16;
+        for (int k = 0; k < 16; ++k) L.val[k] = (uint8_t)(k * 8);
+        force(kMaxSt, 7); force(kRestart, 0); block(m, {}); rebuild(m);
+        m.testEmits_.clear();
+        play(m, 0, 4.0); stop(m);
+        {
+            int high = 0, back = 0;
+            for (auto& e : ons(m, 2)) if (e.a == 40) { if (e.b >= 7 * 8) ++high; if (e.b == 0 && e.t > 1.0) ++back; }
+            CHECK(high == 0 && back >= 1, "CC lane: Max 7 plays lane steps 1-7 only (%d high, %d wraps)", high, back);
+        }
+        // state: PSQ4 keeps Max Steps, Restart, Restart Rate; a PSQ3 project loads with 64 and Restart off
+        m.set(kMaxSt, 5); m.set(kRestart, 1); m.set(kRestartRate, 9); block(m, {});
+        m.testSaveAll(); block(m, {});
+        std::vector<uint8_t> st;
+        m.saveExtraState(st);
+        {
+            PercSeq n4;
+            n4.internalSetSampleRate(48000); n4.internalSetBlockSize(kFr); n4.internalResume();
+            n4.loadExtraState(st.data(), st.size()); n4.internalResume(); block(n4, {});
+            const Sequence& a = n4.testModel().seqs[0];
+            CHECK(a.maxSteps == 5 && a.restart && a.restartRate == 9, "PSQ4: Max Steps 5, Restart on, 1/8 restored");
+            CHECK((int)n4.get(kMaxSt) == 5 && n4.getBool(kRestart), "PSQ4: the SETUP parameters follow the load");
+            std::vector<uint8_t> old(st.begin(), st.end() - 3 * kSeqs);
+            old[3] = '3';
+            PercSeq n3;
+            n3.internalSetSampleRate(48000); n3.internalSetBlockSize(kFr); n3.internalResume();
+            n3.loadExtraState(old.data(), old.size()); n3.internalResume(); block(n3, {});
+            const Sequence& b = n3.testModel().seqs[0];
+            CHECK(b.maxSteps == 64 && !b.restart, "PSQ3 project: Max Steps 64, Restart off (plays as before)");
+        }
+        // display: the shade starts at the row's played end; Steps shows "16 (7)" while capped
+        clearSeq(m);
+        q.rows[0].steps = 16; q.rows[0].rEnd = 15; q.rows[1].steps = 4; q.rows[1].rEnd = 3;
+        force(kMaxSt, 7);
+        m.set(kZoom, 1); m.set(kSelRow, 1); block(m, {}); block(m, {});   // 16 steps on the page, row 1 selected
+        CHECK(near(m.get(kShadeX0 + 0), 7.0 / 16, 1e-3) && near(m.get(kShadeX0 + 1), 4.0 / 16, 1e-3),
+              "shade: row 1 from step 7 (capped), row 2 from its Steps 4: %f %f", m.get(kShadeX0), m.get(kShadeX0 + 1));
+        CHECK(near(m.get(kLnShadeX), 7.0 / 16, 1e-3), "LANE shade from Max Steps (VEL lane of row 1): %f", m.get(kLnShadeX));
+        {
+            std::string txt;
+            m.formatValue(kRSteps, m.get(kRSteps), txt);
+            CHECK(txt == "16 (7)", "Steps text while capped: %s", txt.c_str());
+            force(kMaxSt, 64); block(m, {});
+            m.formatValue(kRSteps, m.get(kRSteps), txt);
+            CHECK(txt == "16" && near(m.get(kShadeX0), 1.0, 1e-3), "Max 64: Steps text 16, shade after the page: %s %f", txt.c_str(), m.get(kShadeX0));
+        }
+        // CLEAR gives a new sequence (Max Steps 7, Restart off)
+        auto tapB = [&](int i) { m.set(i, 1 - m.get(i)); block(m, {}); block(m, {}); };
+        tapB(kSeqClear); tapB(kSeqClear);
+        CHECK(q.maxSteps == 7 && !q.restart, "CLEAR: Max Steps 7, Restart off: %d", q.maxSteps);
+    }
+    // ---- 2026-11-26 (user): SEQ header COPY / PASTE of a hit
+    {
+        PercSeq c;
+        c.internalSetSampleRate(48000); c.internalSetBlockSize(kFr); c.internalResume();
+        block(c, {});
+        clearSeq(c);
+        rebuild(c); block(c, {});
+        auto press = [&](int i) { c.set(i, 1 - c.get(i)); block(c, {}); block(c, {}); };
+        auto pv = [](float px, float pad) { return std::max(0.0f, std::min(1.0f, (px - 1) / (pad - 2))); };
+        const float z = (float)(8 << c.getInt(kZoom));
+        auto tap = [&](float st, int r) {
+            c.set(kRollTX, pv(st / z * kGW, kGW)); c.set(kRollTX + 1, pv((r + 0.5f) * kRowH, kGH)); block(c, {});
+            c.set(kRollTX, 0); block(c, {}); c.set(kRollTX + 1, 0); block(c, {}); block(c, {});
+        };
+        press(kHitPaste);
+        CHECK(!c.getBool(kHitPaste), "PASTE with nothing copied does nothing");
+        Sequence& q = c.testModel().seqs[0];
+        Hit h; h.st = 1; h.len = 2; h.v = 0.3f; h.r = 3; h.fd = -20; h.d = 0.7f; h.nd = 12;
+        h.ch[1].op = O_FLAM; h.ch[1].prob = 0.5f; h.lock[2] = 77;
+        q.rows[2].insert(h);
+        rebuild(c); c.set(kSelRow, 3); block(c, {}); block(c, {});
+        CHECK(c.testSelRow() == 2 && c.testSel() == 0, "the hit is selected");
+        press(kHitCopy);
+        CHECK(c.getBool(kHitCopy), "COPY lights");
+        for (int i = 0; i < 160 * 48 / 64; ++i) block(c, {});
+        CHECK(!c.getBool(kHitCopy), "COPY goes off after 150 ms");
+        press(kHitPaste);
+        CHECK(c.getBool(kHitPaste), "PASTE armed (lit)");
+        press(kHitPaste);
+        CHECK(!c.getBool(kHitPaste), "a second press disarms PASTE");
+        press(kHitPaste);
+        tap(5.3f, 6);   // row 7, Snap line 5 (+ Nudge 12/96)
+        const Row& w = q.rows[6];
+        CHECK(w.count == 1 && near(w.hits[0].st, 5 + 12 / 96.0f, 1e-4) && near(w.hits[0].len, 2, 1e-4), "PASTE: row 7 at 5 + Nudge, length 2 (%d)", w.count);
+        if (w.count == 1)
+            CHECK(near(w.hits[0].v, 0.3f, 1e-6) && w.hits[0].r == 3 && w.hits[0].fd == -20 && near(w.hits[0].d, 0.7f, 1e-6)
+                  && w.hits[0].nd == 12 && w.hits[0].ch[1].op == O_FLAM && w.hits[0].lock[2] == 77, "PASTE: all attributes");
+        CHECK(!c.getBool(kHitPaste) && c.testSelRow() == 6 && c.testSel() == 0, "PASTE: off, the new hit selected");
+        // no full room: shortened; on a hit: nothing, stays armed
+        press(kHitPaste);
+        tap(4.0f, 6);   // 4 + 12/96 .. next hit at 5.125: room ~1
+        CHECK(w.count == 2 && near(w.hits[0].len, 1.0f, 1e-4), "PASTE: shortened to the room (%d, %f)", w.count, w.count ? w.hits[0].len : 0.0f);
+        press(kHitPaste);
+        tap(5.6f, 6);
+        CHECK(w.count == 2 && c.getBool(kHitPaste), "PASTE on a hit: nothing placed, still armed");
+        // shared: another instance pastes the same hit
+        PercSeq d;
+        d.internalSetSampleRate(48000); d.internalSetBlockSize(kFr); d.internalResume(); block(d, {});
+        clearSeq(d); rebuild(d); block(d, {});
+        d.set(kHitPaste, 1); block(d, {}); block(d, {});
+        CHECK(d.getBool(kHitPaste), "PASTE armed in another instance (shared copy)");
     }
     std::printf(g_fail ? "%d FAILED\n" : "all plugin tests passed\n", g_fail);
     return g_fail ? 1 : 0;

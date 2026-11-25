@@ -45,7 +45,7 @@ The pages are in this order. The MPC shows 5 page buttons at a time: touch > for
 
 | Page | What it does |
 |---|---|
-| SEQ | The piano roll. Draw, move and delete notes. The Q-Link banks are at the right. |
+| SEQ | The piano roll. Draw, move and delete notes. COPY and PASTE (header): copy the selected note, then push PASTE and touch where it goes. The Q-Link banks are at the right. |
 | NOTE | All values of the selected note, and step entry. |
 | CHANCE | The 4 chance lanes of the selected note: Op, Prob, PTN, Amount. < > at the top select the note. |
 | LANE | The velocity of the notes, and the 2 CC lanes. Draw the lane values with a finger or with Q-Link column 1. |

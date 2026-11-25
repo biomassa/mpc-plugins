@@ -120,7 +120,9 @@ enum ParamIndex
     // 2026-11-25 (user): the selected note's ratchet hits on the roll, as in the Max roll: one marker set per
     // brightness step (kHitLevels) and hit (8); hit 1 has 10 pieces (up to 1023 px), hits 2-8 have 9
     kHitX0,
-    kNumParams = kHitX0 + 4 * 73
+    // 2026-11-26 (user): SEQ header COPY (the selected note) and PASTE (armed; the next roll touch places it)
+    kNoteCopy = kHitX0 + 4 * 73, kNotePaste,
+    kNumParams
 };
 constexpr int kFirstEdit = kSteps, kLastEdit = kSequence;
 // 2.5: MIDI notes 60-91 on this track select sequences 1-32 (fixed). The 16 pad rows (Pad 1 Note
@@ -170,6 +172,12 @@ struct Touch
 std::atomic<int> g_instances{0};
 // 2.8: the copied sequence, shared by all scalaSeq instances (lost when the MPC app restarts)
 Sequence g_clip;
+// 2026-11-26 (user): the copied note (SEQ header COPY) and its Nudge (start minus its Snap line), shared by
+// all scalaSeq instances
+Note g_noteClip;
+float g_noteClipOff = 0;
+std::atomic<bool> g_noteClipHas{false};
+std::mutex g_noteClipMutex;
 bool g_clipHas = false;
 std::mutex g_clipMutex;
 
@@ -344,6 +352,8 @@ public:
                         const std::string sfx = std::to_string(l + 1) + "." + std::to_string(k + 1) + "." + std::to_string(pc);
                         addParam(mpc::floatParam(("hitx" + sfx).c_str(), ("Hit X " + sfx).c_str(), 0, 1, 0, "", 4));
                     }
+        addParam(mpc::boolParam  ("notecopy",  "Copy Note",  false));
+        addParam(mpc::boolParam  ("notepaste", "Paste Note", false));
         }
 
         if (numParams() != kNumParams) std::abort();   // the index layout and the parameter list must match
@@ -839,7 +849,7 @@ private:
         info.name = "scalaSeq";
         info.vendor = "blackdingus";
         info.uniqueId = MPC_FOURCC('B', 'y', 'Z', 'q');
-        info.version = 2800;
+        info.version = 2900;
         info.isInstrument = true;
         info.numInputs = 0;
         info.numOutputs = 2;
@@ -998,6 +1008,33 @@ private:
             else if (burstSend_ == i - kSend0) stopBurst(false);         // tap again: stop
         }
         tickBurst();
+        // 2026-11-26 (user): COPY takes the selected note (lit for 150 ms); PASTE arms (stays lit) when a note
+        // was copied; a second press disarms it; the next roll touch pastes (onPress)
+        {
+            float v = getNormalised(kNoteCopy);
+            if (v != lastSeen_[kNoteCopy])
+            {
+                lastSeen_[kNoteCopy] = v;
+                if (v >= 0.5f)
+                {
+                    Note* n = selNote();
+                    if (n && g_noteClipMutex.try_lock())
+                    {
+                        const float q = snapQ();
+                        g_noteClip = *n; g_noteClipOff = n->st - std::round(n->st / q) * q;
+                        g_noteClipHas.store(true); g_noteClipMutex.unlock(); copyLitMs_ = msNow();
+                    }
+                    else echo(kNoteCopy, 0);
+                }
+            }
+            if (getNormalised(kNoteCopy) >= 0.5f && msNow() - copyLitMs_ > 150) echo(kNoteCopy, 0);
+            v = getNormalised(kNotePaste);
+            if (v != lastSeen_[kNotePaste])
+            {
+                lastSeen_[kNotePaste] = v;
+                if (v >= 0.5f && !g_noteClipHas.load()) echo(kNotePaste, 0);   // nothing copied yet: does nothing
+            }
+        }
         if (clearArmed_ && msNow() - clearArmMs_ > 3000) { clearArmed_ = false; echo(kClearAll, 0); }   // not confirmed: disarm
         for (int i = kLane0; i < kMask0 + 31; ++i)
         {
@@ -1656,6 +1693,7 @@ private:
         // the roll
         const float fx = rollX(tc), pos = posOfPx(fx);
         const int pitch = rowPitch(rollYUp(tc));
+        if (getNormalised(kNotePaste) >= 0.5f) { gMode_ = 0; pasteNoteAt(pitch, pos); return; }   // 2026-11-26
         int hit = -1;
         for (int i = s.count - 1; i >= 0; --i)   // the later note is drawn on top
         {
@@ -1696,6 +1734,35 @@ private:
         modelDirty_ = true;
         echoNote();
         preview();
+    }
+
+    // 2026-11-26 (user): PASTE: the copied note at the pitch under the finger, starting on the Snap line under
+    // it (exact while FREE is held) plus its Nudge; shortened to the room; on a note of that pitch or
+    // without room nothing happens (PASTE stays armed). The new note is selected; PASTE goes off.
+    void pasteNoteAt(int pitch, float pos)
+    {
+        Note c;
+        float off;
+        if (!g_noteClipMutex.try_lock()) return;
+        c = g_noteClip; off = g_noteClipOff;
+        g_noteClipMutex.unlock();
+        Sequence& s = ed();
+        const float st = std::max(0.0f, snapOrFree(pos) + off);
+        if (st >= s.steps - kEps) return;
+        for (int i = 0; i < s.count; ++i)
+            if (s.notes[i].pitch == pitch && st >= s.notes[i].st - kEps && st < s.notes[i].st + s.notes[i].len - kEps) return;
+        const float room = s.maxLenPitch(st, pitch, -1);
+        if (room < kMinLen) return;
+        c.st = st; c.len = std::min(c.len, room); c.pitch = (int16_t)pitch;
+        const int idx = s.insert(c);
+        if (idx < 0) return;
+        sel_ = idx;
+        lastTapNote_ = -1;
+        modelDirty_ = true;
+        echoNote();
+        preview();
+        echo(kNotePaste, 0);
+        lastSeen_[kNotePaste] = getNormalised(kNotePaste);
     }
 
     void onDrag(int t, Touch& tc)
@@ -2518,6 +2585,7 @@ private:
     bool gDelete_ = false;
     int lastTapNote_ = -1;
     double lastTapMs_ = -1e9;
+    double copyLitMs_ = -1e9;   // 2026-11-26: COPY lit since
     int gView0_ = 0, gZoom0_ = 16, gAxis_ = 0, gLow0_ = 0, gVelNote_ = -1;
 
     std::atomic<int> dispSize_{12}, dispCount_{0};

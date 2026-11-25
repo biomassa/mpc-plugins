@@ -281,14 +281,20 @@
         },
         "empty",
         "empty",
-        "empty",
+        {
+          "param": "Max Steps",
+          "widget": "fader"
+        },
         {
           "param": "Clear Ops",
           "widget": "switch"
         },
         "empty",
         "empty",
-        "empty",
+        {
+          "param": "Restart",
+          "widget": "switch"
+        },
         {
           "param": "Clear All Ops",
           "widget": "switch"

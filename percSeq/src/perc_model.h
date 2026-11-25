@@ -283,6 +283,12 @@ struct Row
 struct Sequence
 {
     Row rows[kRows];
+    // 2026-11-25 (user): Max Steps: no row (and no CC lane) plays more than this many of its own steps (its
+    // Steps is kept); Restart: all rows start again together every maxSteps x rateQ(restartRate), counted
+    // from the song start. New sequences: 7, off, 1/16 (projects saved before: 64, off, 1/16).
+    int maxSteps = 7;
+    bool restart = false;
+    int restartRate = kDefRate;
     Sequence() { for (int r = 0; r < kRows; ++r) { rows[r].note = 36 + r; rows[r].revCC = 102 + r; rows[r].ccNum = 14 + r; } }
 };
 
@@ -308,39 +314,48 @@ struct Tables
     EngCell cells[kMaxHits][kLanes];
 };
 
-// amount of a cell in the engine's units (gate ops: steps; random sound ops: 0 = the whole pool)
-inline float opValue(const Cell& c, const Row& r)
+// amount of a cell in the engine's units (gate ops: steps; random sound ops: 0 = the whole pool);
+// steps, rs, re: the row as it plays (2026-11-25: Max Steps)
+inline float opValueIn(const Cell& c, int steps, int rs, int re)
 {
     const OpInfo& o = opInfo(c.op);
     if (o.unit == U_NONE) return 0;
     int a = c.amt;
     int hi = o.hi;
-    if (o.unit == U_TO) hi = std::min(o.hi, r.steps);
-    if (o.unit == U_ST) hi = std::max(1, std::min(o.hi, r.rEnd - r.rStart));
+    if (o.unit == U_TO) hi = std::min(o.hi, steps);
+    if (o.unit == U_ST) hi = std::max(1, std::min(o.hi, re - rs));
     if (o.unit == U_ROWS && (c.op == O_SNDRP || c.op == O_SNDRM || c.op == O_SNDR) && a == 0) return 0;
     if (!a && o.unit != U_GATE && o.unit != U_CC) a = o.def;
     a = std::max(o.lo, std::min(hi, a));
     return o.unit == U_GATE ? gateSteps(a) : (float)a;
 }
+inline float opValue(const Cell& c, const Row& r) { return opValueIn(c, r.steps, r.rStart, r.rEnd); }
+// 2026-11-25: the row as it plays under Max Steps: steps, Range Start, Range End
+inline int playSteps(const Row& s, int cap) { return std::max(1, std::min(s.steps, std::max(1, cap))); }
+inline int playEnd(const Row& s, int cap) { return std::min(s.rEnd, playSteps(s, cap) - 1); }
+inline int playStart(const Row& s, int cap) { return std::min(s.rStart, playEnd(s, cap)); }
 
-inline void buildTables(const Row& s, Tables& T)
+// cap: Max Steps of the row's sequence (2026-11-25): the row plays min(Steps, cap) steps; a hit that
+// crosses the end plays cut at the end, a hit after it does not play
+inline void buildTables(const Row& s, Tables& T, int cap = kMaxSteps)
 {
-    T.steps = s.steps; T.rs = s.rStart; T.re = s.rEnd; T.swing = s.swing;
+    const int n = playSteps(s, cap), re = playEnd(s, cap), rs = playStart(s, cap);
+    T.steps = n; T.rs = rs; T.re = re; T.swing = s.swing;
     for (int k = 0; k < kMaxSteps; ++k)
         for (int j = 0; j < kSlots; ++j) { T.fwd[k][j] = Slot(); T.rev[k][j] = Slot(); }
     auto put = [&](Slot& sl, float off, float len, int i) {
         const Hit& h = s.hits[i];
         sl.off = off; sl.len = len; sl.rat = h.r; sl.vel = h.v;
         sl.duty = h.d; sl.fade = h.fd; sl.hi = i;
-        sl.room = s.maxLen(h.st, i);
+        sl.room = std::min(s.maxLen(h.st, i), std::max(0.0f, (float)n - h.st));
     };
     int fc[kMaxSteps] = {0}, rc[kMaxSteps] = {0};
     for (int i = 0; i < s.count; ++i)
     {
         const Hit& h = s.hits[i];
         const int k = (int)std::floor(h.st + kEps);
-        if (k < 0 || k >= s.steps || fc[k] >= kSlots) continue;
-        put(T.fwd[k][fc[k]++], std::max(0.0f, h.st - k), h.len, i);
+        if (k < 0 || k >= n || fc[k] >= kSlots) continue;
+        put(T.fwd[k][fc[k]++], std::max(0.0f, h.st - k), std::min(h.len, (float)n - h.st), i);
     }
     // reverse: a hit [a, b) plays mirrored, starting when the backward playhead reaches b;
     // hits starting in the play range are clipped to its end; latest end first in each step
@@ -350,15 +365,15 @@ inline void buildTables(const Row& s, Tables& T)
     for (int i = 0; i < s.count; ++i)
     {
         const Hit& o = s.hits[i];
-        if (o.st < s.rStart - kEps || o.st >= s.rEnd + 1 - kEps) continue;
-        rv[nr++] = {std::min(o.st + o.len, (float)(s.rEnd + 1)), i};
+        if (o.st < rs - kEps || o.st >= re + 1 - kEps) continue;
+        rv[nr++] = {std::min(o.st + o.len, (float)(re + 1)), i};
     }
     std::sort(rv, rv + nr, [](const R& x, const R& y) { return x.b > y.b; });
     for (int q = 0; q < nr; ++q)
     {
         const float b = rv[q].b, a = s.hits[rv[q].i].st;
         const int k = (int)std::ceil(b - kEps) - 1;
-        if (k < 0 || k >= s.steps || rc[k] >= kSlots) continue;
+        if (k < 0 || k >= n || rc[k] >= kSlots) continue;
         put(T.rev[k][rc[k]++], k + 1 - b, b - a, rv[q].i);
     }
     for (int i = 0; i < s.count; ++i)
@@ -367,7 +382,7 @@ inline void buildTables(const Row& s, Tables& T)
             const Cell& c = s.hits[i].ch[l];
             EngCell& e = T.cells[i][l];
             e.op = c.op; e.prob = c.prob; ptnOf(c.ptn, e.pa, e.pb);
-            e.amt = opValue(c, s);
+            e.amt = opValueIn(c, n, rs, re);
         }
 }
 
